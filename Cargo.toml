@@ -49,12 +49,9 @@ features = ["std", "derive", "help"]
 
 [dependencies.rusqlite]
 version = "0.38"
+path = "crates/rusqlite-0.38.0"
 features = ["bundled"]
 
 [dependencies.time]
-version = "0.3"
-features = ["local-offset"]
-
-[build-dependencies.time]
 version = "0.3"
 features = ["local-offset"]
