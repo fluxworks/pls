@@ -1,6 +1,56 @@
 //! Rusqlite is an ergonomic wrapper for using SQLite from Rust.
-
-/*
+//!
+//! Historically, the API was based on the one from
+//! [`rust-postgres`](https://github.com/sfackler/rust-postgres). However, the
+//! two have diverged in many ways, and no compatibility between the two is
+//! intended.
+//!
+//! ```rust
+//! use rusqlite::{params, Connection, Result};
+//!
+//! #[derive(Debug)]
+//! struct Person {
+//!     id: i32,
+//!     name: String,
+//!     data: Option<Vec<u8>>,
+//! }
+//!
+//! fn main() -> Result<()> {
+//!     let conn = Connection::open_in_memory()?;
+//!
+//!     conn.execute(
+//!         "CREATE TABLE person (
+//!             id   INTEGER PRIMARY KEY,
+//!             name TEXT NOT NULL,
+//!             data BLOB
+//!         )",
+//!         (), // empty list of parameters.
+//!     )?;
+//!     let me = Person {
+//!         id: 0,
+//!         name: "Steven".to_string(),
+//!         data: None,
+//!     };
+//!     conn.execute(
+//!         "INSERT INTO person (name, data) VALUES (?1, ?2)",
+//!         (&me.name, &me.data),
+//!     )?;
+//!
+//!     let mut stmt = conn.prepare("SELECT id, name, data FROM person")?;
+//!     let person_iter = stmt.query_map([], |row| {
+//!         Ok(Person {
+//!             id: row.get(0)?,
+//!             name: row.get(1)?,
+//!             data: row.get(2)?,
+//!         })
+//!     })?;
+//!
+//!     for person in person_iter {
+//!         println!("Found person {:?}", person?);
+//!     }
+//!     Ok(())
+//! }
+//! ```
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -1235,6 +1285,1048 @@ impl InterruptHandle {
         }
     }
 }
-*/
+
 #[cfg(doctest)]
 doc_comment::doctest!("../README.md");
+
+#[cfg(test)]
+mod test {
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::*;
+    use fallible_iterator::FallibleIterator;
+    use std::error::Error as StdError;
+    use std::fmt;
+
+    // this function is never called, but is still type checked; in
+    // particular, calls with specific instantiations will require
+    // that those types are `Send`.
+    #[allow(dead_code)]
+    #[expect(unconditional_recursion, clippy::extra_unused_type_parameters)]
+    fn ensure_send<T: Send>() {
+        ensure_send::<Connection>();
+        ensure_send::<InterruptHandle>();
+    }
+
+    #[allow(dead_code)]
+    #[expect(unconditional_recursion, clippy::extra_unused_type_parameters)]
+    fn ensure_sync<T: Sync>() {
+        ensure_sync::<InterruptHandle>();
+    }
+
+    fn checked_memory_handle() -> Connection {
+        Connection::open_in_memory().unwrap()
+    }
+
+    #[cfg_attr(
+        all(target_family = "wasm", target_os = "unknown"),
+        ignore = "no filesystem on this platform"
+    )]
+    #[test]
+    fn test_concurrent_transactions_busy_commit() -> Result<()> {
+        use std::time::Duration;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("transactions.db3");
+
+        Connection::open(&path)?.execute_batch(
+            "
+            BEGIN; CREATE TABLE foo(x INTEGER);
+            INSERT INTO foo VALUES(42); END;",
+        )?;
+
+        let mut db1 = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let mut db2 = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+
+        db1.busy_timeout(Duration::from_millis(0))?;
+        db2.busy_timeout(Duration::from_millis(0))?;
+
+        {
+            let tx1 = db1.transaction()?;
+            let tx2 = db2.transaction()?;
+
+            // SELECT first makes sqlite lock with a shared lock
+            tx1.query_row("SELECT x FROM foo LIMIT 1", [], |_| Ok(()))?;
+            tx2.query_row("SELECT x FROM foo LIMIT 1", [], |_| Ok(()))?;
+
+            tx1.execute("INSERT INTO foo VALUES(?1)", [1])?;
+            let _ = tx2.execute("INSERT INTO foo VALUES(?1)", [2]);
+
+            let _ = tx1.commit();
+            let _ = tx2.commit();
+        }
+
+        let _ = db1
+            .transaction()
+            .expect("commit should have closed transaction");
+        let _ = db2
+            .transaction()
+            .expect("commit should have closed transaction");
+        Ok(())
+    }
+
+    #[cfg_attr(
+        all(target_family = "wasm", target_os = "unknown"),
+        ignore = "no filesystem on this platform"
+    )]
+    #[test]
+    fn test_persistence() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("test.db3");
+
+        {
+            let db = Connection::open(&path)?;
+            let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(42);
+                   END;";
+            db.execute_batch(sql)?;
+        }
+
+        let path_string = path.to_str().unwrap();
+        let db = Connection::open(path_string)?;
+
+        assert_eq!(42, db.one_column::<i64, _>("SELECT x FROM foo", [])?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_open() {
+        Connection::open_in_memory().unwrap();
+
+        let db = checked_memory_handle();
+        db.close().unwrap();
+    }
+
+    #[cfg_attr(
+        all(target_family = "wasm", target_os = "unknown"),
+        ignore = "no filesystem on this platform"
+    )]
+    #[test]
+    fn test_path() -> Result<()> {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Connection::open("")?;
+        assert_eq!(Some(""), db.path());
+        let db = Connection::open_in_memory()?;
+        assert_eq!(Some(""), db.path());
+        let db = Connection::open("file:dummy.db?mode=memory&cache=shared")?;
+        assert_eq!(Some(""), db.path());
+        let path = tmp.path().join("file.db");
+        let db = Connection::open(path)?;
+        assert!(db.path().is_some_and(|p| p.ends_with("file.db")));
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_failure() {
+        let filename = "no_such_file.db";
+        let result = Connection::open_with_flags(filename, OpenFlags::SQLITE_OPEN_READ_ONLY);
+        let err = result.unwrap_err();
+        if let Error::SqliteFailure(e, Some(msg)) = err {
+            assert_eq!(ErrorCode::CannotOpen, e.code);
+            assert_eq!(ffi::SQLITE_CANTOPEN, e.extended_code);
+            assert!(
+                msg.contains(filename),
+                "error message '{msg}' does not contain '{filename}'"
+            );
+        } else {
+            panic!("SqliteFailure expected");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_invalid_unicode_file_names() -> Result<()> {
+        use std::ffi::OsStr;
+        use std::fs::File;
+        use std::os::unix::ffi::OsStrExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let path = temp_dir.path();
+        if File::create(path.join(OsStr::from_bytes(&[0xFE]))).is_err() {
+            // Skip test, filesystem doesn't support invalid Unicode
+            return Ok(());
+        }
+        let db_path = path.join(OsStr::from_bytes(&[0xFF]));
+        {
+            let db = Connection::open(&db_path)?;
+            let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(42);
+                   END;";
+            db.execute_batch(sql)?;
+        }
+
+        let db = Connection::open(&db_path)?;
+
+        assert_eq!(42, db.one_column::<i64, _>("SELECT x FROM foo", [])?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_close_retry() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+
+        // force the DB to be busy by preparing a statement; this must be done at the
+        // FFI level to allow us to call .close() without dropping the prepared
+        // statement first.
+        let raw_stmt = {
+            use super::str_to_cstring;
+            use std::ffi::c_int;
+            use std::ptr;
+
+            let raw_db = db.db.borrow_mut().db;
+            let sql = "SELECT 1";
+            let mut raw_stmt: *mut ffi::sqlite3_stmt = ptr::null_mut();
+            let cstring = str_to_cstring(sql)?;
+            let rc = unsafe {
+                ffi::sqlite3_prepare_v2(
+                    raw_db,
+                    cstring.as_ptr(),
+                    (sql.len() + 1) as c_int,
+                    &mut raw_stmt,
+                    ptr::null_mut(),
+                )
+            };
+            assert_eq!(rc, ffi::SQLITE_OK);
+            raw_stmt
+        };
+
+        // now that we have an open statement, trying (and retrying) to close should
+        // fail.
+        let (db, _) = db.close().unwrap_err();
+        let (db, _) = db.close().unwrap_err();
+        let (db, _) = db.close().unwrap_err();
+
+        // finalize the open statement so a final close will succeed
+        assert_eq!(ffi::SQLITE_OK, unsafe { ffi::sqlite3_finalize(raw_stmt) });
+
+        db.close().unwrap();
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_with_flags() {
+        for bad_flags in &[
+            OpenFlags::empty(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_READ_WRITE,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_CREATE,
+        ] {
+            Connection::open_in_memory_with_flags(*bad_flags).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_execute_batch() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(1);
+                   INSERT INTO foo VALUES(2);
+                   INSERT INTO foo VALUES(3);
+                   INSERT INTO foo VALUES(4);
+                   END;";
+        db.execute_batch(sql)?;
+
+        db.execute_batch("UPDATE foo SET x = 3 WHERE x < 3")?;
+
+        db.execute_batch("INVALID SQL").unwrap_err();
+
+        db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER)")?;
+
+        assert_eq!(1, db.execute("INSERT INTO foo(x) VALUES (?1)", [1i32])?);
+        assert_eq!(1, db.execute("INSERT INTO foo(x) VALUES (?1)", [2i32])?);
+
+        assert_eq!(3, db.one_column::<i32, _>("SELECT SUM(x) FROM foo", [])?);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "extra_check")]
+    fn test_execute_select_with_no_row() {
+        let db = checked_memory_handle();
+        let err = db.execute("SELECT 1 WHERE 1 < ?1", [1i32]).unwrap_err();
+        assert_eq!(
+            err,
+            Error::ExecuteReturnedResults,
+            "Unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_execute_select_with_row() {
+        let db = checked_memory_handle();
+        let err = db.execute("SELECT 1", []).unwrap_err();
+        assert_eq!(err, Error::ExecuteReturnedResults);
+    }
+
+    #[test]
+    fn test_execute_multiple() {
+        let db = checked_memory_handle();
+        let err = db
+            .execute(
+                "CREATE TABLE foo(x INTEGER); CREATE TABLE foo(x INTEGER)",
+                [],
+            )
+            .unwrap_err();
+        match err {
+            Error::MultipleStatement => (),
+            _ => panic!("Unexpected error: {err}"),
+        }
+        db.execute("CREATE TABLE t(c); -- bim", [])
+            .expect("Tail comment should be ignored");
+    }
+
+    #[test]
+    fn test_prepare_column_names() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let stmt = db.prepare("SELECT * FROM foo")?;
+        assert_eq!(stmt.column_count(), 1);
+        assert_eq!(stmt.column_names(), vec!["x"]);
+
+        let stmt = db.prepare("SELECT x AS a, x AS b FROM foo")?;
+        assert_eq!(stmt.column_count(), 2);
+        assert_eq!(stmt.column_names(), vec!["a", "b"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_execute() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let mut insert_stmt = db.prepare("INSERT INTO foo(x) VALUES(?1)")?;
+        assert_eq!(insert_stmt.execute([1i32])?, 1);
+        assert_eq!(insert_stmt.execute([2i32])?, 1);
+        assert_eq!(insert_stmt.execute([3i32])?, 1);
+
+        assert_eq!(insert_stmt.execute(["hello"])?, 1);
+        assert_eq!(insert_stmt.execute(["goodbye"])?, 1);
+        assert_eq!(insert_stmt.execute([types::Null])?, 1);
+
+        let mut update_stmt = db.prepare("UPDATE foo SET x=?1 WHERE x<?2")?;
+        assert_eq!(update_stmt.execute([3i32, 3i32])?, 2);
+        assert_eq!(update_stmt.execute([3i32, 3i32])?, 0);
+        assert_eq!(update_stmt.execute([8i32, 8i32])?, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_query() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let mut insert_stmt = db.prepare("INSERT INTO foo(x) VALUES(?1)")?;
+        assert_eq!(insert_stmt.execute([1i32])?, 1);
+        assert_eq!(insert_stmt.execute([2i32])?, 1);
+        assert_eq!(insert_stmt.execute([3i32])?, 1);
+
+        let mut query = db.prepare("SELECT x FROM foo WHERE x < ?1 ORDER BY x DESC")?;
+        {
+            let mut rows = query.query([4i32])?;
+            let mut v = Vec::<i32>::new();
+
+            while let Some(row) = rows.next()? {
+                v.push(row.get(0)?);
+            }
+
+            assert_eq!(v, [3i32, 2, 1]);
+        }
+
+        {
+            let mut rows = query.query([3i32])?;
+            let mut v = Vec::<i32>::new();
+
+            while let Some(row) = rows.next()? {
+                v.push(row.get(0)?);
+            }
+
+            assert_eq!(v, [2i32, 1]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_query_map() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER, y TEXT);
+                   INSERT INTO foo VALUES(4, \"hello\");
+                   INSERT INTO foo VALUES(3, \", \");
+                   INSERT INTO foo VALUES(2, \"world\");
+                   INSERT INTO foo VALUES(1, \"!\");
+                   END;";
+        db.execute_batch(sql)?;
+
+        let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+        let results: Result<Vec<String>> = query.query([])?.map(|row| row.get(1)).collect();
+
+        assert_eq!(results?.concat(), "hello, world!");
+        Ok(())
+    }
+
+    #[test]
+    fn test_query_row() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(1);
+                   INSERT INTO foo VALUES(2);
+                   INSERT INTO foo VALUES(3);
+                   INSERT INTO foo VALUES(4);
+                   END;";
+        db.execute_batch(sql)?;
+
+        assert_eq!(10, db.one_column::<i64, _>("SELECT SUM(x) FROM foo", [])?);
+
+        let result: Result<i64> = db.one_column("SELECT x FROM foo WHERE x > 5", []);
+        match result.unwrap_err() {
+            Error::QueryReturnedNoRows => (),
+            err => panic!("Unexpected error {err}"),
+        }
+
+        db.query_row("NOT A PROPER QUERY; test123", [], |_| Ok(()))
+            .unwrap_err();
+
+        db.query_row("SELECT 1; SELECT 2;", [], |_| Ok(()))
+            .unwrap_err();
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_optional() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+
+        let result: Result<i64> = db.one_column("SELECT 1 WHERE 0 <> 0", []);
+        let result = result.optional();
+        match result? {
+            None => (),
+            _ => panic!("Unexpected result"),
+        }
+
+        let result: Result<i64> = db.one_column("SELECT 1 WHERE 0 == 0", []);
+        let result = result.optional();
+        match result? {
+            Some(1) => (),
+            _ => panic!("Unexpected result"),
+        }
+
+        let bad_query_result: Result<i64> = db.one_column("NOT A PROPER QUERY", []);
+        let bad_query_result = bad_query_result.optional();
+        bad_query_result.unwrap_err();
+        Ok(())
+    }
+
+    #[test]
+    fn test_pragma_query_row() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert_eq!(
+            "memory",
+            db.one_column::<String, _>("PRAGMA journal_mode", [])?
+        );
+        let mode = db.one_column::<String, _>("PRAGMA journal_mode=off", [])?;
+        if cfg!(feature = "bundled") {
+            assert_eq!(mode, "off");
+        } else {
+            // Note: system SQLite on macOS defaults to "off" rather than
+            // "memory" for the journal mode (which cannot be changed for
+            // in-memory connections). This seems like it's *probably* legal
+            // according to the docs below, so we relax this test when not
+            // bundling:
+            //
+            // From https://www.sqlite.org/pragma.html#pragma_journal_mode
+            // > Note that the journal_mode for an in-memory database is either
+            // > MEMORY or OFF and can not be changed to a different value. An
+            // > attempt to change the journal_mode of an in-memory database to
+            // > any setting other than MEMORY or OFF is ignored.
+            assert!(mode == "memory" || mode == "off", "Got mode {mode:?}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_failures() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let err = db.prepare("SELECT * FROM does_not_exist").unwrap_err();
+        assert!(format!("{err}").contains("does_not_exist"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_last_insert_rowid() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER PRIMARY KEY)")?;
+        db.execute_batch("INSERT INTO foo DEFAULT VALUES")?;
+
+        assert_eq!(db.last_insert_rowid(), 1);
+
+        let mut stmt = db.prepare("INSERT INTO foo DEFAULT VALUES")?;
+        for _ in 0i32..9 {
+            stmt.execute([])?;
+        }
+        assert_eq!(db.last_insert_rowid(), 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_total_changes() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "CREATE TABLE foo(x INTEGER PRIMARY KEY, value TEXT default '' NOT NULL,
+                                    desc TEXT default '');
+                   CREATE VIEW foo_bar AS SELECT x, desc FROM foo WHERE value = 'bar';
+                   CREATE TRIGGER INSERT_FOOBAR
+                   INSTEAD OF INSERT
+                   ON foo_bar
+                   BEGIN
+                       INSERT INTO foo VALUES(new.x, 'bar', new.desc);
+                   END;";
+        db.execute_batch(sql)?;
+        let total_changes_before = db.total_changes();
+        let changes = db
+            .prepare("INSERT INTO foo_bar VALUES(null, 'baz');")?
+            .execute([])?;
+        let total_changes_after = db.total_changes();
+        assert_eq!(changes, 0);
+        assert_eq!(total_changes_after - total_changes_before, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_autocommit() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(
+            db.is_autocommit(),
+            "autocommit expected to be active by default"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_busy() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(!db.is_busy());
+        let mut stmt = db.prepare("PRAGMA schema_version")?;
+        assert!(!db.is_busy());
+        {
+            let mut rows = stmt.query([])?;
+            assert!(!db.is_busy());
+            let row = rows.next()?;
+            assert!(db.is_busy());
+            assert!(row.is_some());
+        }
+        assert!(!db.is_busy());
+        Ok(())
+    }
+
+    #[test]
+    fn test_statement_debugging() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let query = "SELECT 12345";
+        let stmt = db.prepare(query)?;
+
+        assert!(format!("{stmt:?}").contains(query));
+        Ok(())
+    }
+
+    #[test]
+    fn test_notnull_constraint_error() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x NOT NULL)")?;
+
+        let result = db.execute("INSERT INTO foo (x) VALUES (NULL)", []);
+
+        match result.unwrap_err() {
+            Error::SqliteFailure(err, _) => {
+                assert_eq!(err.code, ErrorCode::ConstraintViolation);
+                assert_eq!(err.extended_code, ffi::SQLITE_CONSTRAINT_NOTNULL);
+            }
+            err => panic!("Unexpected error {err}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_version_string() {
+        let n = version_number();
+        let major = n / 1_000_000;
+        let minor = (n % 1_000_000) / 1_000;
+        let patch = n % 1_000;
+
+        assert!(version().contains(&format!("{major}.{minor}.{patch}")));
+    }
+
+    #[test]
+    #[cfg(feature = "functions")]
+    fn test_interrupt() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+
+        let interrupt_handle = db.get_interrupt_handle();
+
+        db.create_scalar_function(
+            "interrupt",
+            0,
+            functions::FunctionFlags::default(),
+            move |_| {
+                interrupt_handle.interrupt();
+                Ok(0)
+            },
+        )?;
+
+        let mut stmt =
+            db.prepare("SELECT interrupt() FROM (SELECT 1 UNION SELECT 2 UNION SELECT 3)")?;
+
+        let result: Result<Vec<i32>> = stmt.query([])?.map(|r| r.get(0)).collect();
+
+        assert_eq!(
+            result.unwrap_err().sqlite_error_code(),
+            Some(ErrorCode::OperationInterrupted)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_interrupt_close() {
+        let db = checked_memory_handle();
+        let handle = db.get_interrupt_handle();
+        handle.interrupt();
+        db.close().unwrap();
+        handle.interrupt();
+
+        // Look at its internals to see if we cleared it out properly.
+        let db_guard = handle.db_lock.lock().unwrap();
+        assert!(db_guard.is_null());
+        // It would be nice to test that we properly handle close/interrupt
+        // running at the same time, but it seems impossible to do with any
+        // degree of reliability.
+    }
+
+    #[test]
+    fn test_get_raw() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(i, x);")?;
+        let vals = ["foobar", "1234", "qwerty"];
+        let mut insert_stmt = db.prepare("INSERT INTO foo(i, x) VALUES(?1, ?2)")?;
+        for (i, v) in vals.iter().enumerate() {
+            let i_to_insert = i as i64;
+            assert_eq!(insert_stmt.execute(params![i_to_insert, v])?, 1);
+        }
+
+        let mut query = db.prepare("SELECT i, x FROM foo")?;
+        let mut rows = query.query([])?;
+
+        while let Some(row) = rows.next()? {
+            let i = row.get_ref(0)?.as_i64()?;
+            let expect = vals[i as usize];
+            let x = row.get_ref("x")?.as_str()?;
+            assert_eq!(x, expect);
+        }
+
+        let mut query = db.prepare("SELECT x FROM foo")?;
+        let rows = query.query_map([], |row| {
+            let x = row.get_ref(0)?.as_str()?; // check From<FromSqlError> for Error
+            Ok(x[..].to_owned())
+        })?;
+
+        for (i, row) in rows.enumerate() {
+            assert_eq!(row?, vals[i]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_handle() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let handle = unsafe { db.handle() };
+        {
+            let db = unsafe { Connection::from_handle(handle) }?;
+            db.execute_batch("PRAGMA VACUUM")?;
+        }
+        db.close().unwrap();
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_handle_owned() -> Result<()> {
+        let mut handle: *mut ffi::sqlite3 = std::ptr::null_mut();
+        let r = unsafe { ffi::sqlite3_open(c":memory:".as_ptr(), &mut handle) };
+        assert_eq!(r, ffi::SQLITE_OK);
+        let db = unsafe { Connection::from_handle_owned(handle) }?;
+        db.execute_batch("PRAGMA VACUUM")?;
+        Ok(())
+    }
+
+    mod query_and_then_tests {
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        use wasm_bindgen_test::wasm_bindgen_test as test;
+
+        use super::*;
+
+        #[derive(Debug)]
+        enum CustomError {
+            SomeError,
+            Sqlite(Error),
+        }
+
+        impl fmt::Display for CustomError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+                match *self {
+                    Self::SomeError => write!(f, "my custom error"),
+                    Self::Sqlite(ref se) => write!(f, "my custom error: {se}"),
+                }
+            }
+        }
+
+        impl StdError for CustomError {
+            fn description(&self) -> &str {
+                "my custom error"
+            }
+
+            fn cause(&self) -> Option<&dyn StdError> {
+                match *self {
+                    Self::SomeError => None,
+                    Self::Sqlite(ref se) => Some(se),
+                }
+            }
+        }
+
+        impl From<Error> for CustomError {
+            fn from(se: Error) -> Self {
+                Self::Sqlite(se)
+            }
+        }
+
+        type CustomResult<T> = Result<T, CustomError>;
+
+        #[test]
+        fn test_query_and_then() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let results: Result<Vec<String>> =
+                query.query_and_then([], |row| row.get(1))?.collect();
+
+            assert_eq!(results?.concat(), "hello, world!");
+            Ok(())
+        }
+
+        #[test]
+        fn test_query_and_then_fails() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let bad_type: Result<Vec<f64>> = query.query_and_then([], |row| row.get(1))?.collect();
+
+            match bad_type.unwrap_err() {
+                Error::InvalidColumnType(..) => (),
+                err => panic!("Unexpected error {err}"),
+            }
+
+            let bad_idx: Result<Vec<String>> =
+                query.query_and_then([], |row| row.get(3))?.collect();
+
+            match bad_idx.unwrap_err() {
+                Error::InvalidColumnIndex(_) => (),
+                err => panic!("Unexpected error {err}"),
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn test_query_and_then_custom_error() -> CustomResult<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let results: CustomResult<Vec<String>> = query
+                .query_and_then([], |row| row.get(1).map_err(CustomError::Sqlite))?
+                .collect();
+
+            assert_eq!(results?.concat(), "hello, world!");
+            Ok(())
+        }
+
+        #[test]
+        fn test_query_and_then_custom_error_fails() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let bad_type: CustomResult<Vec<f64>> = query
+                .query_and_then([], |row| row.get(1).map_err(CustomError::Sqlite))?
+                .collect();
+
+            match bad_type.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnType(..)) => (),
+                err => panic!("Unexpected error {err}"),
+            }
+
+            let bad_idx: CustomResult<Vec<String>> = query
+                .query_and_then([], |row| row.get(3).map_err(CustomError::Sqlite))?
+                .collect();
+
+            match bad_idx.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnIndex(_)) => (),
+                err => panic!("Unexpected error {err}"),
+            }
+
+            let non_sqlite_err: CustomResult<Vec<String>> = query
+                .query_and_then([], |_| Err(CustomError::SomeError))?
+                .collect();
+
+            match non_sqlite_err.unwrap_err() {
+                CustomError::SomeError => (),
+                err => panic!("Unexpected error {err}"),
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn test_query_row_and_then_custom_error() -> CustomResult<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let query = "SELECT x, y FROM foo ORDER BY x DESC";
+            let results: CustomResult<String> =
+                db.query_row_and_then(query, [], |row| row.get(1).map_err(CustomError::Sqlite));
+
+            assert_eq!(results?, "hello");
+            Ok(())
+        }
+
+        #[test]
+        fn test_query_row_and_then_custom_error_fails() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let query = "SELECT x, y FROM foo ORDER BY x DESC";
+            let bad_type: CustomResult<f64> =
+                db.query_row_and_then(query, [], |row| row.get(1).map_err(CustomError::Sqlite));
+
+            match bad_type.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnType(..)) => (),
+                err => panic!("Unexpected error {err}"),
+            }
+
+            let bad_idx: CustomResult<String> =
+                db.query_row_and_then(query, [], |row| row.get(3).map_err(CustomError::Sqlite));
+
+            match bad_idx.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnIndex(_)) => (),
+                err => panic!("Unexpected error {err}"),
+            }
+
+            let non_sqlite_err: CustomResult<String> =
+                db.query_row_and_then(query, [], |_| Err(CustomError::SomeError));
+
+            match non_sqlite_err.unwrap_err() {
+                CustomError::SomeError => (),
+                err => panic!("Unexpected error {err}"),
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_dynamic() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       END;";
+        db.execute_batch(sql)?;
+
+        db.query_row("SELECT * FROM foo", [], |r| {
+            assert_eq!(2, r.as_ref().column_count());
+            Ok(())
+        })
+    }
+    #[test]
+    fn test_dyn_box() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+        let b: Box<dyn ToSql> = Box::new(5);
+        db.execute("INSERT INTO foo VALUES(?1)", [b])?;
+        db.query_row("SELECT x FROM foo", [], |r| {
+            assert_eq!(5, r.get_unwrap::<_, i32>(0));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_params() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.query_row(
+            "SELECT
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+            ?31, ?32, ?33, ?34;",
+            params![
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1,
+            ],
+            |r| {
+                assert_eq!(1, r.get_unwrap::<_, i32>(0));
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    fn test_alter_table() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE x(t);")?;
+        // `execute_batch` should be used but `execute` should also work
+        db.execute("ALTER TABLE x RENAME TO y;", [])?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_batch() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = r"
+             CREATE TABLE tbl1 (col);
+             CREATE TABLE tbl2 (col);
+             ";
+        let mut batch = Batch::new(&db, sql);
+        while let Some(mut stmt) = batch.next()? {
+            stmt.execute([])?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_batch() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = r"
+            PRAGMA test1;
+            PRAGMA test2=?;
+            PRAGMA test3;
+            ";
+        let mut batch = Batch::new(&db, sql);
+        assert!(batch.next().is_ok());
+        assert!(batch.next().is_err());
+        assert!(batch.next().is_err());
+        assert!(Batch::new(&db, sql).count().is_err());
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "modern_sqlite")]
+    fn test_returning() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER PRIMARY KEY)")?;
+        let row_id =
+            db.one_column::<i64, _>("INSERT INTO foo DEFAULT VALUES RETURNING ROWID", [])?;
+        assert_eq!(row_id, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_cache_flush() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.cache_flush()
+    }
+
+    #[test]
+    fn db_readonly() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(!db.is_readonly(MAIN_DB)?);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "rusqlite-macros")]
+    fn prepare_and_bind() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let name = "Lisa";
+        let age = 8;
+        let mut stmt = prepare_and_bind!(db, "SELECT $name, $age;");
+        let (v1, v2) = stmt
+            .raw_query()
+            .next()
+            .and_then(|o| o.ok_or(Error::QueryReturnedNoRows))
+            .and_then(|r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        assert_eq!((v1.as_str(), v2), (name, age));
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "modern_sqlite")]
+    fn test_db_name() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert_eq!(db.db_name(0)?, "main");
+        assert_eq!(db.db_name(1)?, "temp");
+        assert_eq!(db.db_name(2), Err(Error::InvalidDatabaseIndex(2)));
+        db.execute_batch("ATTACH DATABASE ':memory:' AS xyz;")?;
+        assert_eq!(db.db_name(2)?, "xyz");
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "modern_sqlite")]
+    fn test_is_interrupted() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(!db.is_interrupted());
+        db.get_interrupt_handle().interrupt();
+        assert!(db.is_interrupted());
+        Ok(())
+    }
+
+    #[test]
+    fn release_memory() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.release_memory()
+    }
+}
