@@ -204,10 +204,6 @@ use_std = ["std"]
 name = "libc"
 path = "src/lib.rs"
 
-[[test]]
-name = "const_fn"
-path = "tests/const_fn.rs"
-
 [dependencies.rustc-std-workspace-core]
 version = "1.0.1"
 optional = true

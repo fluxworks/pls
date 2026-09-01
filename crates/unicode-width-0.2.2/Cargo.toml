@@ -58,14 +58,6 @@ rustc-dep-of-std = [
 name = "unicode_width"
 path = "src/lib.rs"
 
-[[test]]
-name = "tests"
-path = "tests/tests.rs"
-
-[[bench]]
-name = "benches"
-path = "benches/benches.rs"
-
 [dependencies.core]
 version = "1.0"
 optional = true

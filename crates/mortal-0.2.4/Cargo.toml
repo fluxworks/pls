@@ -30,37 +30,24 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/murarth/mortal"
 
 [dependencies.bitflags]
-version = "2.0"
+version = "2.11.1"
+path = "../bitflags-2.11.1"
 
 [dependencies.smallstr]
-version = "0.2"
+version = "0.2.0"
+path = "../smallstr-0.2.0"
 
 [dependencies.unicode-normalization]
-version = "0.1"
+version = "0.1.25"
+path = "../unicode-normalization-0.1.25"
 
 [dependencies.unicode-width]
-version = "0.1"
-
-[dev-dependencies.rand]
-version = "0.8"
-
-[target."cfg(unix)".dependencies.libc]
-version = "0.2"
-
-[target."cfg(unix)".dependencies.nix]
-version = "0.26"
-features = [
-    "poll",
-    "signal",
-    "term",
-]
-default-features = false
-
-[target."cfg(unix)".dependencies.terminfo]
-version = "0.8"
+version = "0.2.2"
+path = "../unicode-width-0.2.2"
 
 [target."cfg(windows)".dependencies.winapi]
-version = "0.3"
+path = "../winapi-0.3.9"
+version = "0.3.9"
 features = [
     "consoleapi",
     "handleapi",
@@ -74,3 +61,6 @@ features = [
     "winnt",
     "winuser",
 ]
+
+[dev-dependencies.rand]
+version = "0.8"

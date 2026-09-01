@@ -73,10 +73,6 @@ path = "examples/macro_free.rs"
 name = "serde"
 path = "examples/serde.rs"
 
-[[bench]]
-name = "parse"
-path = "benches/parse.rs"
-
 [dependencies.arbitrary]
 version = "1.0"
 optional = true

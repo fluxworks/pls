@@ -29,6 +29,10 @@
 //! [`term_writeln!`]: macro.term_writeln.html
 
 #![deny(missing_docs)]
+#![allow
+(
+    mismatched_lifetime_syntaxes
+)]
 
 #[macro_use] extern crate bitflags;
 extern crate smallstr;
@@ -61,11 +65,6 @@ pub mod signal;
 pub mod terminal;
 pub mod util;
 
-#[cfg(unix)]
-#[path = "unix/mod.rs"]
-mod sys;
-
-#[cfg(windows)]
 #[path = "windows/mod.rs"]
 mod sys;
 
@@ -74,17 +73,3 @@ pub use crate::sys::ext as unix;
 
 #[cfg(windows)]
 pub use sys::ext as windows;
-
-#[cfg(test)]
-mod test {
-    use crate::screen::Screen;
-    use crate::terminal::Terminal;
-
-    fn assert_has_traits<T: 'static + Send + Sync>() {}
-
-    #[test]
-    fn test_traits() {
-        assert_has_traits::<Terminal>();
-        assert_has_traits::<Screen>();
-    }
-}

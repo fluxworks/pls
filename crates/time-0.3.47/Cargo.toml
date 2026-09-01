@@ -111,17 +111,9 @@ name = "time"
 path = "src/lib.rs"
 bench = false
 
-[[test]]
-name = "tests"
-path = "tests/integration/main.rs"
-
-[[bench]]
-name = "benchmarks"
-path = "benchmarks/main.rs"
-harness = false
-
 [dependencies.deranged]
-version = "0.5.2"
+path = "../deranged-0.5.8"
+version = "0.5.8"
 features = ["powerfmt"]
 
 [dependencies.itoa]
@@ -129,9 +121,11 @@ version = "1.0.1"
 optional = true
 
 [dependencies.num-conv]
+path = "../num-conv-0.2.1"
 version = "0.2.0"
 
 [dependencies.powerfmt]
+path = "../powerfmt-0.2.0"
 version = "0.2.0"
 default-features = false
 
@@ -153,12 +147,14 @@ default-features = false
 package = "rand"
 
 [dependencies.serde_core]
-version = "1.0.220"
+path = "../serde_core-1.0.228"
+version = "1.0.228"
 optional = true
 default-features = false
 
 [dependencies.time-core]
 version = "=0.1.8"
+path = "../time-core-0.1.8"
 
 [dependencies.time-macros]
 version = "=0.2.27"
@@ -166,6 +162,7 @@ optional = true
 
 [dev-dependencies.num-conv]
 version = "0.2.0"
+path = "../num-conv-0.2.1"
 
 [dev-dependencies.quickcheck_macros]
 version = "1.0.0"
@@ -189,7 +186,7 @@ default-features = false
 version = "0.7.0"
 
 [dev-dependencies.serde]
-version = "1.0.184"
+version = "1.0.228"
 features = ["derive"]
 default-features = false
 
@@ -217,7 +214,8 @@ default-features = false
 version = "0.2.98"
 optional = true
 
-[target.'cfg(target_family = "unix")'.dependencies.num_threads]
+[dependencies.num_threads]
+path = "../num_threads-0.1.2"
 version = "0.1.2"
 optional = true
 

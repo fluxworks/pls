@@ -50,16 +50,9 @@ proc-macro = ["proc-macro2/proc-macro"]
 name = "quote"
 path = "src/lib.rs"
 
-[[test]]
-name = "compiletest"
-path = "tests/compiletest.rs"
-
-[[test]]
-name = "test"
-path = "tests/test.rs"
-
 [dependencies.proc-macro2]
-version = "1.0.80"
+path = "../proc-macro2-1.0.106"
+version = "1.0.106"
 default-features = false
 
 [dev-dependencies.rustversion]

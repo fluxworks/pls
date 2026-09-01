@@ -30,6 +30,12 @@
 #![forbid(missing_docs)]
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
 
+#![allow
+(
+    mismatched_lifetime_syntaxes,
+    unused_must_use,
+)]
+
 // Optional Serde support
 #[cfg(feature = "serde_impl")]
 pub mod serde;

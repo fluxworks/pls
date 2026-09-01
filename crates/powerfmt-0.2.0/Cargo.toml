@@ -43,7 +43,6 @@ rustdoc-args = [
     "__powerfmt_docs",
     "--generate-link-to-definition",
 ]
-targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies.powerfmt-macros]
 version = "=0.1.0"

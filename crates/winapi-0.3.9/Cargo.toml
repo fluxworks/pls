@@ -428,7 +428,10 @@ wtsapi32 = []
 wtypes = []
 wtypesbase = []
 xinput = []
+
 [target.i686-pc-windows-gnu.dependencies.winapi-i686-pc-windows-gnu]
 version = "0.4"
+
 [target.x86_64-pc-windows-gnu.dependencies.winapi-x86_64-pc-windows-gnu]
+path = "../winapi-x86_64-pc-windows-gnu-0.4.0"
 version = "0.4"

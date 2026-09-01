@@ -24,28 +24,60 @@ name = "cicada"
 doc = false
 
 [dependencies]
-errno = "0.3.14"
-exec = "0.3.1"
-glob = "0.3.3"
-lazy_static = "1.5.0"
-libc = "0.2.178"
-# lineread = { path = "../lineread" }
-lineread = "0.7"
-pest = "2.8"
-pest_derive = "2.8"
-regex = "1"
-yaml-rust = "0.4.5"
-uuid = { version = "1.19", features = ["serde", "v4"] }
 structopt = { version = "0.3", default-features = false }
+
+
+[dependencies.uuid]
+version = "1.23.1"
+path = "crates/uuid-1.23.1"
+features = ["serde", "v4"]
+
+[dependencies.yaml-rust]
+path = "crates/yaml-rust-0.4.5"
+version = "0.4.5"
+
+[dependencies.regex]
+version = "1.12.3"
+path = "crates/regex-1.12.3"
+
+[dependencies.pest]
+version = "2.8.6"
+path = "crates/pest-2.8.6"
+
+[dependencies.pest_derive]
+version = "2.8.6"
+path = "crates/pest_derive-2.8.6"
+
+[dependencies.exec]
+version = "0.3.1"
+path = "crates/exec-0.3.1"
+
+[dependencies.glob]
+version = "0.3.3"
+path = "crates/glob-0.3.3"
+
+[dependencies.lazy_static]
+version = "1.5.0"
+path = "crates/lazy_static-1.5.0"
+
+[dependencies.libc]
+version = "0.2.185"
+path = "crates/libc-0.2.185"
+
+[dependencies.lineread]
+version = "0.7.4"
+path = "crates/lineread-0.7.4"
 
 [dependencies.nix]
 version = "0.31"
 features = ["fs", "process", "signal"]
+path = "crates/nix-0.31.2"
 
 [dependencies.clap]
 version = "4.5"
 default-features = false
 features = ["std", "derive", "help"]
+path = "crates/clap-4.6.1"
 
 [dependencies.rusqlite]
 version = "0.38"
@@ -54,5 +86,9 @@ features = ["bundled"]
 
 [dependencies.time]
 version = "0.3"
-features = ["local-offset"]
 path = "crates/time-0.3.47"
+features = ["local-offset"]
+
+[dependencies.errno]
+version = "0.3.14"
+path = "crates/errno-0.3.14"

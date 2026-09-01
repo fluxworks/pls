@@ -30,10 +30,12 @@
 
 #![no_std]
 #![deny(missing_docs)]
+#![allow
+(
+    mismatched_lifetime_syntaxes,
+)]
 
 extern crate alloc;
-
-#[cfg(any(feature = "error", feature = "ffi",))]
 extern crate std;
 
 pub use string::*;

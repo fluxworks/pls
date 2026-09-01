@@ -78,6 +78,7 @@ optional = true
 default-features = false
 
 [dependencies.powerfmt]
+path = "../powerfmt-0.2.0"
 version = "0.2.0"
 optional = true
 default-features = false

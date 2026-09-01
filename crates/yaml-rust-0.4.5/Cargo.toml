@@ -21,7 +21,10 @@ documentation = "https://docs.rs/yaml-rust"
 readme = "README.md"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/chyh1990/yaml-rust"
+
 [dependencies.linked-hash-map]
-version = "0.5.3"
+path = "../linked-hash-map-0.5.6"
+version = "0.5.6"
+
 [dev-dependencies.quickcheck]
 version = "0.9"

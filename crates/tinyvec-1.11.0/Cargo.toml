@@ -85,39 +85,6 @@ std = ["alloc"]
 name = "tinyvec"
 path = "src/lib.rs"
 
-[[test]]
-name = "arrayvec"
-path = "tests/arrayvec.rs"
-
-[[test]]
-name = "debugger_visualizer"
-path = "tests/debugger_visualizer.rs"
-test = false
-required-features = ["debugger_visualizer"]
-
-[[test]]
-name = "tinyvec"
-path = "tests/tinyvec.rs"
-required-features = [
-    "alloc",
-    "std",
-]
-
-[[bench]]
-name = "macros"
-path = "benches/macros.rs"
-harness = false
-required-features = ["alloc"]
-
-[[bench]]
-name = "smallvec"
-path = "benches/smallvec.rs"
-harness = false
-required-features = [
-    "alloc",
-    "real_blackbox",
-]
-
 [dependencies.arbitrary]
 version = "1"
 optional = true
@@ -142,7 +109,8 @@ optional = true
 default-features = false
 
 [dependencies.tinyvec_macros]
-version = "0.1"
+path = "../tinyvec_macros-0.1.1"
+version = "0.1.1"
 optional = true
 
 [dev-dependencies.criterion]

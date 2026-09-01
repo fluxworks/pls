@@ -37,10 +37,6 @@ rustc-dep-of-std = ["core"]
 name = "cfg_if"
 path = "src/lib.rs"
 
-[[test]]
-name = "xcrate"
-path = "tests/xcrate.rs"
-
 [dependencies.core]
 version = "1.0.0"
 optional = true

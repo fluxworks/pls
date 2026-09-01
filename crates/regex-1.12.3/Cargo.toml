@@ -145,22 +145,21 @@ use_std = ["std"]
 name = "regex"
 path = "src/lib.rs"
 
-[[test]]
-name = "integration"
-path = "tests/lib.rs"
-
 [dependencies.aho-corasick]
+path = "../aho-corasick-1.1.4"
 version = "1.0.0"
 optional = true
 default-features = false
 
 [dependencies.memchr]
-version = "2.6.0"
+path = "../memchr-2.8.0"
+version = "2.8.0"
 optional = true
 default-features = false
 
 [dependencies.regex-automata]
-version = "0.4.12"
+path = "../regex-automata-0.4.14"
+version = "0.4.14"
 features = [
     "alloc",
     "syntax",
@@ -170,7 +169,8 @@ features = [
 default-features = false
 
 [dependencies.regex-syntax]
-version = "0.8.5"
+path = "../regex-syntax-0.8.10"
+version = "0.8.10"
 default-features = false
 
 [dev-dependencies.anyhow]

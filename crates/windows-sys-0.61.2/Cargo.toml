@@ -287,6 +287,7 @@ test = false
 doctest = false
 
 [dependencies.windows-link]
+path = "../windows-link-0.2.1"
 version = "0.2.1"
 default-features = false
 

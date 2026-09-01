@@ -19,11 +19,10 @@ documentation = "https://docs.rs/exec/"
 readme = "README.md"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/faradayio/exec-rs"
-[dependencies.errno]
-version = "0.2"
 
-[dependencies.libc]
-version = "0.2.8"
+[dependencies.errno]
+version = "0.3.14"
+path = "../errno-0.3.14"
 
 [features]
 unstable = []

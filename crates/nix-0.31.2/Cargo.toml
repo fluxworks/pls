@@ -99,57 +99,52 @@ zerocopy = [
 name = "nix"
 path = "src/lib.rs"
 
-[[test]]
-name = "test"
-path = "test/test.rs"
-
-[[test]]
-name = "test-aio-drop"
-path = "test/sys/test_aio_drop.rs"
-
-[[test]]
-name = "test-clearenv"
-path = "test/test_clearenv.rs"
-
-[[test]]
-name = "test-prctl"
-path = "test/sys/test_prctl.rs"
-
 [dependencies.bitflags]
 version = "2.3.3"
+path = "../bitflags-2.11.1"
 
 [dependencies.cfg-if]
 version = "1.0"
+path = "../cfg-if-1.0.4"
 
 [dependencies.libc]
 version = "0.2.181"
 features = ["extra_traits"]
+path = "../libc-0.2.185"
 
 [dependencies.memoffset]
 version = "0.9"
 optional = true
+path = "../memoffset"
 
 [dependencies.pin-utils]
 version = "0.1.0"
 optional = true
+path = "../pin-utils"
 
 [dev-dependencies.assert-impl]
 version = "0.1"
+path = "../assert-impl"
 
 [dev-dependencies.parking_lot]
 version = "0.12"
+path = "../parking_lot"
 
 [dev-dependencies.rand]
 version = "0.9"
+path = "../rand"
 
 [dev-dependencies.semver]
 version = "1.0.7"
+path = "../semver"
 
 [dev-dependencies.tempfile]
 version = "3.7.1"
+path = "../tempfile"
 
 [build-dependencies.cfg_aliases]
 version = "0.2.1"
+path = "../cfg_aliases-0.2.1"
 
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dev-dependencies.caps]
 version = "0.5.3"

@@ -506,10 +506,12 @@ doc-scrape-examples = true
 required-features = ["derive"]
 
 [dependencies.clap_builder]
+path = "../clap_builder-4.6.0"
 version = "=4.6.0"
 default-features = false
 
 [dependencies.clap_derive]
+path = "../clap_derive-4.6.1"
 version = "=4.6.1"
 optional = true
 
