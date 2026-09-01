@@ -26,11 +26,6 @@ categories = ["os::windows-apis"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/microsoft/windows-rs"
 
-[package.metadata.docs.rs]
-default-target = "x86_64-pc-windows-msvc"
-targets = []
-all-features = true
-
 [features]
 Wdk = ["Win32_Foundation"]
 Wdk_Devices = ["Wdk"]
@@ -290,11 +285,3 @@ doctest = false
 path = "../windows-link-0.2.1"
 version = "0.2.1"
 default-features = false
-
-[lints.rust]
-missing_unsafe_on_extern = "warn"
-
-[lints.rust.unexpected_cfgs]
-level = "warn"
-priority = 0
-check-cfg = ["cfg(windows_raw_dylib, windows_slim_errors)"]

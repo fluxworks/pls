@@ -10,7 +10,13 @@
 //! directly. See [structopt documentation](https://docs.rs/structopt)
 //! for the usage of `#[derive(StructOpt)]`.
 
-#![allow(clippy::large_enum_variant)]
+#![allow
+(
+    clippy::large_enum_variant,
+    dead_code,
+    mismatched_lifetime_syntaxes,
+    unused_parens,
+)]
 // FIXME: remove when and if our MSRV hits 1.42
 #![allow(clippy::match_like_matches_macro)]
 #![forbid(unsafe_code)]

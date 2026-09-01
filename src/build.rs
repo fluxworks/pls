@@ -1,6 +1,4 @@
-extern crate time;
 use std::process::Command;
-use time::OffsetDateTime;
 
 fn main() {
     match Command::new("git")
@@ -47,19 +45,5 @@ fn main() {
         Err(_) => {
             println!("cargo:rustc-env=BUILD_RUSTC_VERSION=");
         }
-    }
-
-    if let Ok(dt) = OffsetDateTime::now_local() {
-        let dt_str = format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
-            dt.year(),
-            dt.month() as u8,
-            dt.day(),
-            dt.hour(),
-            dt.minute(),
-            dt.second(),
-            dt.millisecond(),
-        );
-        println!("cargo:rustc-env=BUILD_DATE={}", dt_str);
     }
 }

@@ -111,10 +111,10 @@ js = [
 ]
 macro-diagnostics = []
 md5 = ["dep:md-5"]
-rng = ["dep:getrandom"]
+rng = ["dep:rand"]
 rng-getrandom = [
     "rng",
-    "dep:getrandom",
+    "dep:rand",
     "uuid-rng-internal-lib",
     "uuid-rng-internal-lib/getrandom",
 ]
@@ -141,6 +141,11 @@ v8 = []
 [lib]
 name = "uuid"
 path = "src/lib.rs"
+
+[dependencies.rand]
+path = "../rand-0.10.2"
+version = "0.10.2"
+optional = true
 
 [dependencies.arbitrary]
 version = "1.1.3"
@@ -215,12 +220,6 @@ default-features = false
 [target.'cfg(not(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"))))'.dependencies.getrandom]
 version = "0.4"
 optional = true
-
-[target.'cfg(not(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"))))'.dependencies.rand]
-version = "0.10"
-optional = true
-
-
 
 [dev-dependencies.rustversion]
 version = "1"

@@ -16,7 +16,7 @@ use std::ffi::{CString, NulError, OsStr, OsString};
 use std::iter::{IntoIterator, Iterator};
 use std::fmt;
 use std::ptr;
-use std::os::unix::ffi::OsStrExt;
+//use std::os::unix::ffi::OsStrExt;
 
 /// Represents an error calling `exec`.
 ///
