@@ -1,0 +1,75 @@
+// Copyright 2018 Developers of the Rand project.
+// Copyright 2013-2018 The Rust Project Developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! # Monte Carlo estimation of π with a chosen seed and rayon for parallelism
+//!
+//! Imagine that we have a square with sides of length 2 and a unit circle
+//! (radius = 1), both centered at the origin. The areas are:
+//!
+//! ```text
+//!     area of circle  = πr² = π * r * r = π
+//!     area of square  = 2² = 4
+//! ```
+//!
+//! The circle is entirely within the square, so if we sample many points
+//! randomly from the square, roughly π / 4 of them should be inside the circle.
+//!
+//! We can use the above fact to estimate the value of π: pick many points in
+//! the square at random, calculate the fraction that fall within the circle,
+//! and multiply this fraction by 4.
+//!
+//! ### A note on the use of explicit batching
+//!
+//! Rayon's `ParallelIterator::map_init` does not guarantee that the work will
+//! be batched identically on every run. By using the `map` function to
+//! construct fixed-size batches, each with a dedicated PRNG, we are able to
+//! achieve a deterministic result with little extra code.
+//!
+//! Due to the small work-item size (the inner loop) batching also improves
+//! performance significantly due to the reduced scheduling overhead.
+
+use rand::distr::{Distribution, Uniform};
+use rand::rngs::Xoshiro256PlusPlus;
+use rand_core::SeedableRng;
+use rayon::prelude::*;
+
+const BATCH_SIZE: u64 = 10_000;
+const BATCHES: u64 = 1000;
+
+fn main() {
+    let range = Uniform::new(-1.0f64, 1.0).unwrap();
+
+    let in_circle = (0..BATCHES)
+        .into_par_iter()
+        .map(|i| {
+            // If we didn't care for determinism we could use SmallRng instead:
+            // let mut rng: SmallRng = rand::make_rng();
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(i);
+
+            let mut count = 0;
+            for _ in 0..BATCH_SIZE {
+                let a = range.sample(&mut rng);
+                let b = range.sample(&mut rng);
+                if a * a + b * b <= 1.0 {
+                    count += 1;
+                }
+            }
+            count
+        })
+        .sum::<usize>();
+
+    // assert this is deterministic
+    assert_eq!(in_circle, 7853568);
+
+    // prints something close to 3.14159...
+    println!(
+        "π is approximately {}",
+        4. * (in_circle as f64) / ((BATCH_SIZE * BATCHES) as f64)
+    );
+}

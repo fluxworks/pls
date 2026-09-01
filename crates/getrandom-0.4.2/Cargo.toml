@@ -63,23 +63,13 @@ wasm_js = [
 name = "getrandom"
 path = "src/lib.rs"
 
-[[test]]
-name = "mod"
-path = "tests/mod.rs"
-
-[[test]]
-name = "sys_rng"
-path = "tests/sys_rng.rs"
-
-[[bench]]
-name = "buffer"
-path = "benches/buffer.rs"
-
 [dependencies.cfg-if]
-version = "1"
+path = "../cfg-if-1.0.4"
+version = "1.0.4"
 
 [dependencies.rand_core]
-version = "0.10.0"
+path = "../rand_core-0.10.1"
+version = "0.10.1"
 optional = true
 
 [target.'cfg(all(any(target_os = "linux", target_os = "android"), not(any(all(target_os = "linux", target_env = ""), getrandom_backend = "custom", getrandom_backend = "linux_raw", getrandom_backend = "rdrand", getrandom_backend = "rndr"))))'.dependencies.libc]

@@ -24,5 +24,9 @@ repository = "https://github.com/faradayio/exec-rs"
 version = "0.3.14"
 path = "../errno-0.3.14"
 
+[dependencies.libc]
+version = "0.2.185"
+path = "../libc-0.2.185"
+
 [features]
 unstable = []

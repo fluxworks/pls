@@ -18,6 +18,7 @@
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#[allow(dead_code)]
 
 #[cfg_attr(unix, path = "unix.rs")]
 #[cfg_attr(windows, path = "windows.rs")]

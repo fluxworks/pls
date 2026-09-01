@@ -6,6 +6,12 @@
 //! that module doesn't export sufficient hooks to allow us to add a new
 //! way to execute a program.
 
+#![allow
+(
+    bare_trait_objects,
+    unused_imports,
+)]
+
 extern crate errno;
 extern crate libc;
 
@@ -53,9 +59,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Error::BadArgument(ref err) =>
-                write!(f, "{}: {}", self.description(), err),
+                write!(f, "{}: {}", self.to_string(), err),
             &Error::Errno(err) =>
-                write!(f, "{}: {}", self.description(), err),
+                write!(f, "{}: {}", self.to_string(), err),
         }
     }
 }
@@ -100,9 +106,9 @@ pub fn execvp<S, I>(program: S, args: I) -> Error
     // Add null terminations to our strings and our argument array,
     // converting them into a C-compatible format.
     let program_cstring =
-        exec_try!(CString::new(program.as_ref().as_bytes()));
+        exec_try!(CString::new(program.as_ref().as_encoded_bytes()));
     let arg_cstrings = exec_try!(args.into_iter().map(|arg| {
-        CString::new(arg.as_ref().as_bytes())
+        CString::new(arg.as_ref().as_encoded_bytes())
     }).collect::<Result<Vec<_>, _>>());
     let mut arg_charptrs: Vec<_> = arg_cstrings.iter().map(|arg| {
         arg.as_ptr()
