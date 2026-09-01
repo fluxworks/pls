@@ -55,3 +55,4 @@ features = ["bundled"]
 [dependencies.time]
 version = "0.3"
 features = ["local-offset"]
+path = "crates/time-0.3.47"
