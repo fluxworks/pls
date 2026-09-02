@@ -1,0 +1,37 @@
+[package]
+authors = ["Marcin S. <scatman@bu.edu>"]
+description = "OVER: the best data format."
+documentation = "https://docs.rs/over"
+keywords = [
+    "config",
+    "format",
+    "minimal",
+    "intuitive",
+    "powerful",
+]
+license = "MIT"
+name = "over"
+readme = "README.md"
+repository = "https://github.com/mrcnski/over"
+version = "0.6.6"
+edition = "2018"
+
+[dependencies.num-bigint]
+version = "0.2.6"
+path = "../num-bigint-0.2.6"
+
+[dependencies.num-rational]
+version = "0.2.4"
+path = "../num-rational-0.2.4"
+
+[dependencies.num-traits]
+version = "0.2.19"
+path = "../num-traits-0.2.19"
+
+[dependencies.lazy_static]
+version = "1.5.0"
+path = "../lazy_static-1.5.0"
+
+[dev-dependencies]
+criterion = "0.5"
+pretty_assertions = "0.6"

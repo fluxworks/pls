@@ -2,8 +2,8 @@ use std::io;
 use std::sync::{LockResult, Mutex, MutexGuard, TryLockResult};
 use std::time::Duration;
 
-use winapi::shared::ntdef::HANDLE;
-use winapi::um::wincon::INPUT_RECORD;
+use crate::shared::ntdef::HANDLE;
+use crate::um::wincon::INPUT_RECORD;
 
 use crate::buffer::ScreenBuffer;
 use crate::priv_util::{

@@ -3,7 +3,7 @@
 use std::io;
 use std::time::Duration;
 
-use winapi::um::wincon::INPUT_RECORD;
+use crate::um::wincon::INPUT_RECORD;
 
 use crate::priv_util::Private;
 use crate::terminal::Event;

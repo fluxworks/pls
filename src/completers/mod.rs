@@ -109,7 +109,7 @@ fn for_dots(line: &str) -> bool {
     match prefix::get_effective_command(line) {
         Some(cmd) => {
             let dir = tools::get_user_completer_dir();
-            let dot_file = format!("{}/{}.yaml", dir, cmd);
+            let dot_file = format!("{}/{}.over", dir, cmd);
             Path::new(dot_file.as_str()).exists()
         }
         None => false,

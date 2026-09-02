@@ -8,18 +8,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LockResult, Mutex, MutexGuard, TryLockResult};
 use std::time::Duration;
 
-use winapi::ctypes::c_int;
-use winapi::shared::winerror::{
+use crate::ctypes::c_int;
+use crate::shared::winerror::{
     WAIT_TIMEOUT,
 };
-use winapi::shared::minwindef::{
+use crate::shared::minwindef::{
     FALSE, TRUE,
     BOOL, DWORD, WORD,
 };
-use winapi::shared::ntdef::{
+use crate::shared::ntdef::{
     CHAR, SHORT, VOID, WCHAR, HANDLE,
 };
-use winapi::um::consoleapi::{
+use crate::um::consoleapi::{
     SetConsoleCtrlHandler,
     GetConsoleMode,
     ReadConsoleW,
@@ -27,21 +27,21 @@ use winapi::um::consoleapi::{
     WriteConsoleW,
     SetConsoleMode,
 };
-use winapi::um::handleapi::{
+use crate::um::handleapi::{
     CloseHandle,
 };
-use winapi::um::processenv::{
+use crate::um::processenv::{
     GetStdHandle,
 };
-use winapi::um::synchapi::{
+use crate::um::synchapi::{
     WaitForSingleObject,
 };
-use winapi::um::winbase::{
+use crate::um::winbase::{
     INFINITE,
     STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
     WAIT_FAILED, WAIT_OBJECT_0,
 };
-use winapi::um::wincon::{
+use crate::um::wincon::{
     self,
     CreateConsoleScreenBuffer,
     WriteConsoleInputW,
@@ -68,8 +68,8 @@ use winapi::um::wincon::{
     ENABLE_PROCESSED_OUTPUT, ENABLE_WRAP_AT_EOL_OUTPUT,
     KEY_EVENT, MOUSE_EVENT, WINDOW_BUFFER_SIZE_EVENT,
 };
-use winapi::um::winuser;
-use winapi::um::winnt::{
+use crate::um::winuser;
+use crate::um::winnt::{
     GENERIC_READ, GENERIC_WRITE,
     FILE_SHARE_READ, FILE_SHARE_WRITE,
 };

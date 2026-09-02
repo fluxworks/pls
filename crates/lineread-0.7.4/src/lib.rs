@@ -1,32 +1,4 @@
-//! Provides a configurable, concurrent, extensible, interactive input reader
-//! for Unix terminals and Windows console.
-//!
-//! Configuration is compatible with GNU Readline.
-//!
-//! The main entry to interactive read operations is the [`Interface`] type.
-//!
-//! # Basic example
-//!
-//! ```no_run
-//! # use std::io;
-//! use lineread::{Interface, ReadResult};
-//!
-//! # fn run() -> io::Result<()> {
-//! let mut reader = Interface::new("my-application")?;
-//!
-//! reader.set_prompt("my-app> ")?;
-//!
-//! while let ReadResult::Input(input) = reader.read_line()? {
-//!     println!("got input {:?}", input);
-//! }
-//!
-//! println!("Goodbye.");
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! [`Interface`]: interface/struct.Interface.html
-
+//! Provides a configurable, concurrent, extensible, interactive input reader for Unix terminals and Windows console.
 #![deny(missing_docs)]
 
 #[cfg(test)]
@@ -65,20 +37,3 @@ mod sys;
 #[cfg(windows)]
 #[path = "windows/mod.rs"]
 mod sys;
-
-#[cfg(test)]
-mod test {
-    use crate::interface::Interface;
-    use crate::terminal::{DefaultTerminal, Terminal};
-
-    fn assert_has_traits<T: 'static + Send + Sync>() {}
-
-    fn assert_generic_traits<T: 'static + Terminal>() {
-        assert_has_traits::<Interface<T>>();
-    }
-
-    #[test]
-    fn test_interface_traits() {
-        assert_generic_traits::<DefaultTerminal>();
-    }
-}

@@ -10,8 +10,8 @@ use lineread::complete::Suffix;
 use lineread::complete::{Completer, Completion};
 use lineread::prompter::Prompter;
 use lineread::terminal::Terminal;
-use yaml_rust::yaml::Hash;
-use yaml_rust::{Yaml, YamlLoader};
+use over::yaml::Hash;
+use over::{Yaml, YamlLoader};
 
 use crate::execute;
 use crate::libs::prefix;
@@ -53,7 +53,7 @@ fn get_dot_file(line: &str) -> (String, String) {
     };
 
     let dir = tools::get_user_completer_dir();
-    let dot_file = format!("{}/{}.yaml", dir, cmd);
+    let dot_file = format!("{}/{}.over", dir, cmd);
     if !Path::new(&dot_file).exists() {
         return (String::new(), String::new());
     }
@@ -197,13 +197,13 @@ fn complete_dots(line: &str, word: &str) -> Vec<Completion> {
                             }
                         }
                         _ => {
-                            println_stderr!("\nThis yaml file is in bad format: {}", dot_file);
+                            println_stderr!("\nThis over file is in bad format: {}", dot_file);
                         }
                     }
                 }
             }
             _ => {
-                println_stderr!("\nThis yaml file is in bad format: {}", dot_file);
+                println_stderr!("\nThis over file is in bad format: {}", dot_file);
             }
         }
     }

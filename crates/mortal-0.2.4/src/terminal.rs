@@ -1132,7 +1132,7 @@ impl crate::windows::TerminalExt for Terminal {
         self.0.read_raw(buf, timeout)
     }
 
-    fn read_raw_event(&mut self, events: &mut [::winapi::um::wincon::INPUT_RECORD],
+    fn read_raw_event(&mut self, events: &mut [crate::um::wincon::INPUT_RECORD],
             timeout: Option<Duration>) -> io::Result<Option<Event>> {
         self.0.read_raw_event(events, timeout)
     }
@@ -1144,7 +1144,7 @@ impl<'a> crate::windows::TerminalExt for TerminalReadGuard<'a> {
         self.0.read_raw(buf, timeout)
     }
 
-    fn read_raw_event(&mut self, events: &mut [::winapi::um::wincon::INPUT_RECORD],
+    fn read_raw_event(&mut self, events: &mut [crate::um::wincon::INPUT_RECORD],
             timeout: Option<Duration>) -> io::Result<Option<Event>> {
         self.0.read_raw_event(events, timeout)
     }

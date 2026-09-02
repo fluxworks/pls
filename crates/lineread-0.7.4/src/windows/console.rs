@@ -7,9 +7,9 @@ use std::time::Duration;
 use mortal::windows::TerminalExt;
 use mortal::{Event, TerminalReadGuard};
 
-use winapi::shared::minwindef::{DWORD, TRUE};
-use winapi::um::wincon::{self, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD};
-use winapi::um::winuser;
+use crate::shared::minwindef::{DWORD, TRUE};
+use crate::um::wincon::{self, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD};
+use crate::um::winuser;
 
 use crate::chars::DELETE;
 use crate::terminal::RawRead;

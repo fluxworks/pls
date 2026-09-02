@@ -45,22 +45,22 @@ path = "../unicode-normalization-0.1.25"
 version = "0.2.2"
 path = "../unicode-width-0.2.2"
 
-[target."cfg(windows)".dependencies.winapi]
-path = "../winapi-0.3.9"
-version = "0.3.9"
-features = [
-    "consoleapi",
-    "handleapi",
-    "minwindef",
-    "ntdef",
-    "processenv",
-    "synchapi",
-    "winbase",
-    "wincon",
-    "winerror",
-    "winnt",
-    "winuser",
-]
+#[target."cfg(windows)".dependencies.winapi]
+#path = "../winapi-0.3.9"
+#version = "0.3.9"
+#features = [
+#    "consoleapi",
+#    "handleapi",
+#    "minwindef",
+#    "ntdef",
+#    "processenv",
+#    "synchapi",
+#    "winbase",
+#    "wincon",
+#    "winerror",
+#    "winnt",
+#    "winuser",
+#]
 
 [dev-dependencies.rand]
 version = "0.8"
