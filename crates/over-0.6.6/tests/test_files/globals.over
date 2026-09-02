@@ -1,0 +1,14 @@
+@global1: 1
+
+sub: {
+    @global2: 2
+
+    a: @global1
+    b: @global2
+}
+
+c: @global2
+
+# Test that duplicate globals across includes are allowed.
+@a: null
+include: <Obj "includes/globals.over">

@@ -1,0 +1,34 @@
+ # Comment
+ _a1:1 a2: 2
+ _:0 #
+b: "Smörgåsbord"#
+ c: 10# Comment
+d: 20 #Comment
+# Comment "with a string"
+eee: 2
+# Comment
+ f: 3
+
+
+# Multi-line
+# Comment
+
+
+g_: 4
+
+Hello:"Hello"
+i_robot: "not #a comment"
+j:#
+4
+k:# Comment
+"hi"
+ l: "\$\\\""
+ m: #Comment
+ "m" n: true o: false
+
+p: Hello
+q:_
+r: null
+s: "\'" t: "\n" u: " " v: "'" w: "$"
+
+x: 1 # Can fetch this as a Frac
