@@ -1,6 +1,10 @@
 //! OVER: the best data format.
 
 #![deny(missing_docs)]
+#![allow
+(
+    mismatched_lifetime_syntaxes,
+)]
 
 #[macro_use]
 extern crate lazy_static;

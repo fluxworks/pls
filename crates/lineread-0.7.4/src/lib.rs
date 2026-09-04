@@ -1,5 +1,10 @@
 //! Provides a configurable, concurrent, extensible, interactive input reader for Unix terminals and Windows console.
-#![deny(missing_docs)]
+#![allow
+(
+    nonstandard_style,
+    unexpected_cfgs,
+    unused_imports,
+)]
 
 #[cfg(test)]
 #[macro_use]

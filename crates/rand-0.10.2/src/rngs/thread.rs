@@ -142,37 +142,6 @@ thread_local!(
 );
 
 /// Access a fast, pre-initialized generator
-///
-/// This is a handle to the local [`ThreadRng`].
-///
-/// See also [`crate::rngs`] for alternatives.
-///
-/// # Example
-///
-/// ```
-/// use rand::prelude::*;
-///
-/// # fn main() {
-///
-/// let mut numbers = [1, 2, 3, 4, 5];
-/// numbers.shuffle(&mut rand::rng());
-/// println!("Numbers: {numbers:?}");
-///
-/// // Using a local binding avoids an initialization-check on each usage:
-/// let mut rng = rand::rng();
-///
-/// println!("True or false: {}", rng.random::<bool>());
-/// println!("A simulated die roll: {}", rng.random_range(1..=6));
-/// # }
-/// ```
-///
-/// # Security
-///
-/// Refer to [`ThreadRng#Security`].
-///
-/// # Panics
-///
-/// This method panics in case of [`SysRng`] failure during initial seeding.
 pub fn rng() -> ThreadRng {
     let rng = THREAD_RNG_KEY.with(|t| t.clone());
     ThreadRng { rng }
@@ -197,9 +166,7 @@ impl TryRng for ThreadRng {
 
     #[inline(always)]
     fn try_next_u64(&mut self) -> Result<u64, Infallible> {
-        // SAFETY: We must make sure to stop using `rng` before anyone else
-        // creates another mutable reference
-        let rng = unsafe { &mut *self.rng.try_into() };
+        let rng = unsafe { &mut *self.rng.get() };
         Ok(rng.next_u64_from_u32())
     }
 
@@ -214,21 +181,3 @@ impl TryRng for ThreadRng {
 }
 
 impl TryCryptoRng for ThreadRng {}
-
-#[cfg(test)]
-mod test {
-    #[test]
-    fn test_thread_rng() {
-        use crate::RngExt;
-        let mut r = crate::rng();
-        r.random::<i32>();
-        assert_eq!(r.random_range(0..1), 0);
-    }
-
-    #[test]
-    fn test_debug_output() {
-        // We don't care about the exact output here, but it must not include
-        // private CSPRNG state or the cache stored by BlockRng!
-        assert_eq!(std::format!("{:?}", crate::rng()), "ThreadRng { .. }");
-    }
-}

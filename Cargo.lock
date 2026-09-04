@@ -20,12 +20,6 @@ name = "autocfg"
 version = "1.5.1"
 
 [[package]]
-name = "autocfg"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,20 +247,9 @@ dependencies = [
 name = "num-bigint"
 version = "0.2.6"
 dependencies = [
- "autocfg 1.5.1",
- "num-integer 0.1.47",
- "num-traits 0.2.19",
-]
-
-[[package]]
-name = "num-bigint"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "090c7f9998ee0ff65aa5b723e4009f7b217707f1fb5ea551329cc4d6231fb304"
-dependencies = [
- "autocfg 1.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-integer 0.1.47 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-traits 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
+ "autocfg",
+ "num-integer",
+ "num-traits",
 ]
 
 [[package]]
@@ -277,42 +260,24 @@ version = "0.2.1"
 name = "num-integer"
 version = "0.1.47"
 dependencies = [
- "num-traits 0.2.19",
-]
-
-[[package]]
-name = "num-integer"
-version = "0.1.47"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
-dependencies = [
- "num-traits 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-traits",
 ]
 
 [[package]]
 name = "num-rational"
 version = "0.2.4"
 dependencies = [
- "autocfg 1.5.1",
- "num-bigint 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-integer 0.1.47 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-traits 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
+ "autocfg",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
 ]
 
 [[package]]
 name = "num-traits"
 version = "0.2.19"
 dependencies = [
- "autocfg 1.5.1",
-]
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg 1.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "autocfg",
 ]
 
 [[package]]
@@ -330,9 +295,9 @@ name = "over"
 version = "0.6.6"
 dependencies = [
  "lazy_static",
- "num-bigint 0.2.6",
+ "num-bigint",
  "num-rational",
- "num-traits 0.2.19",
+ "num-traits",
 ]
 
 [[package]]

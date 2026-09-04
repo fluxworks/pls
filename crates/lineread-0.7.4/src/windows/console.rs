@@ -7,9 +7,9 @@ use std::time::Duration;
 use mortal::windows::TerminalExt;
 use mortal::{Event, TerminalReadGuard};
 
-use crate::shared::minwindef::{DWORD, TRUE};
-use crate::um::wincon::{self, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD};
-use crate::um::winuser;
+use mortal::shared::minwindef::{DWORD, TRUE};
+use mortal::um::wincon::{self, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD};
+use mortal::um::winuser;
 
 use crate::chars::DELETE;
 use crate::terminal::RawRead;
@@ -72,7 +72,7 @@ seq_group! { RIGHT_SEQ, "C" }
 seq_group! { LEFT_SEQ, "D" }
 
 pub fn terminal_read(term: &mut TerminalReadGuard, buf: &mut Vec<u8>) -> io::Result<RawRead> {
-    let mut events: [INPUT_RECORD; 1] = unsafe { zeroed() };
+    let mut events: [mortal::um::wincon::INPUT_RECORD; 1] = unsafe { zeroed() };
 
     let n = match term.read_raw_event(&mut events, Some(Duration::new(0, 0)))? {
         Some(Event::Raw(n)) => n,

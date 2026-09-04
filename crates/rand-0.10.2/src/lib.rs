@@ -208,6 +208,101 @@ type NonZeroRawOsError = core::num::NonZeroI32;
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct SysError(NonZeroRawOsError);
 
+impl SysError
+{
+    pub const UNSUPPORTED: SysError = Self::new_internal(0);
+    pub const ERRNO_NOT_POSITIVE: SysError = Self::new_internal(1);
+    pub const UNEXPECTED: SysError = Self::new_internal(2);
+    const INTERNAL_START: RawOsError = 1 << 16;
+    const CUSTOM_START: RawOsError = 1 << 17;
+    /// Creates a new `Error` instance from a positive error code.
+    pub fn from_errno(errno: i32) -> Self
+    {
+        if errno > 0
+        {
+            let code = errno.checked_neg().expect("Positive number can be always negated");
+            SysError::from_neg_error_code(code)
+        }
+        else { Self::ERRNO_NOT_POSITIVE }
+    }
+    /// Creates a new `Error` instance from a negative error code.
+    pub fn from_neg_error_code(code: RawOsError) -> Self
+    {
+        if code < 0 {
+            let code = NonZeroRawOsError::new(code).expect("`code` is negative");
+            Self(code)
+        }
+        else
+        {
+            Self::UNEXPECTED
+        }
+    }
+    /// Extract the raw OS error code (if this error came from the OS)
+    #[inline] pub fn raw_os_error(self) -> Option<RawOsError>
+    {
+        let code = self.0.get();
+        if code >= 0 { None } else { Some(code) }
+    }
+    /// Creates a new instance of an `Error` from a particular custom error code.
+    pub const fn new_custom(n: u16) -> Self
+    {
+        let code = Self::CUSTOM_START + (n as RawOsError);
+        Self(unsafe { NonZeroRawOsError::new_unchecked(code) })
+    }
+
+    /// Creates a new instance of an `Error` from a particular internal error code.
+    pub(crate) const fn new_internal(n: u16) -> Self
+    {
+        let code = Self::INTERNAL_START + (n as RawOsError);
+        Self(unsafe { NonZeroRawOsError::new_unchecked(code) })
+    }
+
+    fn internal_desc(&self) -> Option<&'static str>
+    {
+        let desc = match *self
+        {
+            Self::UNSUPPORTED => "getrandom: this target is not supported",
+            Self::ERRNO_NOT_POSITIVE => "errno: did not return a positive value",
+            Self::UNEXPECTED => "unexpected situation",
+            _ => return None,
+        };
+        Some(desc)
+    }
+}
+
+impl std::error::Error for SysError {}
+
+impl std::fmt::Debug for SysError
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        let mut dbg = f.debug_struct("Error");
+        if let Some(errno) = self.raw_os_error() {
+            dbg.field("os_error", &errno);
+            #[cfg(feature = "std")]
+            dbg.field("description", &std::io::Error::from_raw_os_error(errno));
+        } else if let Some(desc) = self.internal_desc() {
+            dbg.field("internal_code", &self.0.get());
+            dbg.field("description", &desc);
+        } else {
+            dbg.field("unknown_code", &self.0.get());
+        }
+        dbg.finish()
+    }
+}
+
+impl std::fmt::Display for SysError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(errno) = self.raw_os_error() {
+            write!(f, "OS Error: {errno}")
+        } else if let Some(desc) = self.internal_desc() {
+            f.write_str(desc)
+        } else {
+            write!(f, "Unknown Error: {}", self.0.get())
+        }
+    }
+}
+
 /// A [`TryRng`] interface over the system's preferred random number source
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SysRng;
@@ -259,7 +354,7 @@ pub fn inner_u64() -> Result<u64, SysError> {
 
 pub fn fill_uninit(dest: &mut [MaybeUninit<u8>]) -> Result<&mut [u8], SysError> {
     if !dest.is_empty() {
-        return Ok( [].into() );
+        return Ok( &mut [] );
     }
 
     #[cfg(getrandom_msan)]

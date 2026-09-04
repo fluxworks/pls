@@ -1,13 +1,11 @@
 //! Platform-independent terminal interface
 
-#![deny(missing_docs)]
 #![allow
 (
-
     mismatched_lifetime_syntaxes,
     non_camel_case_types,
+    non_snake_case,
     unused_imports,
-
 )]
 
 #[macro_use] extern crate bitflags;
@@ -202,7 +200,7 @@ pub mod um
         {
             ctypes::{ * },
             shared::ntdef::{*},
-            um::wincon::{ PINPUT_RECORD, PHANDLER_ROUTINE },
+            um::wincon::{ PCONSOLE_READCONSOLE_CONTROL, PINPUT_RECORD, PHANDLER_ROUTINE },
             *
         };
 
@@ -222,6 +220,8 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
+            shared::{ ntdef::{ HANDLE } },
             *
         };
 
@@ -236,6 +236,8 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
+            shared::{ ntdef::{ HANDLE } },
             *
         };
 
@@ -252,6 +254,8 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
+            shared::{ ntdef::{ HANDLE } },
             *
         };
 
@@ -271,7 +275,7 @@ pub mod um
             {
                 winnt::
                 {
-
+                    STATUS_WAIT_0, STATUS_ABANDONED_WAIT_0, STATUS_USER_APC
                 },
             },
             *
@@ -398,6 +402,15 @@ pub mod um
             EventType: WORD,
             Event: INPUT_RECORD_Event,
         }}
+
+        STRUCT!{struct CONSOLE_READCONSOLE_CONTROL {
+            nLength: ULONG,
+            nInitialChars: ULONG,
+            dwCtrlWakeupMask: ULONG,
+            dwControlKeyState: ULONG,
+        }}
+
+        pub type PCONSOLE_READCONSOLE_CONTROL = *mut CONSOLE_READCONSOLE_CONTROL;
 
         pub type PINPUT_RECORD = *mut INPUT_RECORD;
         pub const KEY_EVENT: WORD = 0x0001;
@@ -796,7 +809,7 @@ pub mod shared
 
         pub type HRESULT = c_long;
 
-        pub const DXGI_ERROR_WAIT_TIMEOUT: HRESULT = 0x887A0027;
+        pub const DXGI_ERROR_WAIT_TIMEOUT: HRESULT = 0x887A0027u32 as i32;
 
         pub const ERROR_ABANDONED_WAIT_0: DWORD = 735;
         pub const ERROR_ABANDONED_WAIT_63: DWORD = 736;
@@ -808,9 +821,9 @@ pub mod shared
 
         pub const ERROR_WAIT_FOR_OPLOCK: DWORD = 765;
 
-        pub const PLA_E_DCS_START_WAIT_TIMEOUT: HRESULT = 0x8030010A;
-        pub const PLA_E_DC_START_WAIT_TIMEOUT: HRESULT = 0x8030010B;
-        pub const PLA_E_REPORT_WAIT_TIMEOUT: HRESULT = 0x8030010C;
+        pub const PLA_E_DCS_START_WAIT_TIMEOUT: HRESULT = 0x8030010Au32 as i32;
+        pub const PLA_E_DC_START_WAIT_TIMEOUT: HRESULT = 0x8030010Bu32 as i32;
+        pub const PLA_E_REPORT_WAIT_TIMEOUT: HRESULT = 0x8030010Cu32 as i32;
 
         pub const WAIT_TIMEOUT: DWORD = 258;
 
