@@ -66,12 +66,46 @@ pub mod ctypes
     pub type __int64 = i64;
     pub type __uint64 = u64;
     pub type wchar_t = u16;
+
+    pub type ULONG = c_ulong;
+    pub type PULONG = *mut ULONG;
+    pub type USHORT = c_ushort;
+    pub type PUSHORT = *mut USHORT;
+    pub type UCHAR = c_uchar;
+    pub type PUCHAR = *mut UCHAR;
+    pub type PSZ = *mut c_char;
+    pub const MAX_PATH: usize = 260;
+    pub const FALSE: BOOL = 0;
+    pub const TRUE: BOOL = 1;
+    pub type DWORD = c_ulong;
+    pub type BOOL = c_int;
+    pub type BYTE = c_uchar;
+    pub type WORD = c_ushort;
+    pub type FLOAT = c_float;
+    pub type PFLOAT = *mut FLOAT;
+    pub type PBOOL = *mut BOOL;
+    pub type LPBOOL = *mut BOOL;
+    pub type PBYTE = *mut BYTE;
+    pub type LPBYTE = *mut BYTE;
+    pub type PINT = *mut c_int;
+    pub type LPINT = *mut c_int;
+    pub type PWORD = *mut WORD;
+    pub type LPWORD = *mut WORD;
+    pub type LPLONG = *mut c_long;
+    pub type PDWORD = *mut DWORD;
+    pub type LPDWORD = *mut DWORD;
+    pub type LPVOID = *mut c_void;
+    pub type LPCVOID = *const c_void;
+    pub type INT = c_int;
+    pub type UINT = c_uint;
+    pub type PUINT = *mut c_uint;
 }
 
 pub mod um
 {
     use crate::
     {
+        ctypes::{ * },
         *
     };
 
@@ -79,6 +113,9 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
+            shared::ntdef::{*},
+            um::wincon::{ PINPUT_RECORD, PHANDLER_ROUTINE },
             *
         };
 
@@ -142,6 +179,7 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
             *
         };
 
@@ -162,8 +200,84 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
+            shared::ntdef::{ * },
             *
         };
+
+        pub const RIGHT_ALT_PRESSED: DWORD = 0x0001;
+        pub const LEFT_ALT_PRESSED: DWORD = 0x0002;
+        pub const RIGHT_CTRL_PRESSED: DWORD = 0x0004;
+        pub const LEFT_CTRL_PRESSED: DWORD = 0x0008;
+        pub const SHIFT_PRESSED: DWORD = 0x0010;
+        pub const NUMLOCK_ON: DWORD = 0x0020;
+        pub const SCROLLLOCK_ON: DWORD = 0x0040;
+        pub const CAPSLOCK_ON: DWORD = 0x0080;
+        pub const ENHANCED_KEY: DWORD = 0x0100;
+        pub const NLS_DBCSCHAR: DWORD = 0x00010000;
+        pub const NLS_ALPHANUMERIC: DWORD = 0x00000000;
+        pub const NLS_KATAKANA: DWORD = 0x00020000;
+        pub const NLS_HIRAGANA: DWORD = 0x00040000;
+        pub const NLS_ROMAN: DWORD = 0x00400000;
+        pub const NLS_IME_CONVERSION: DWORD = 0x00800000;
+        pub const NLS_IME_DISABLE: DWORD = 0x20000000;
+
+        pub const FROM_LEFT_1ST_BUTTON_PRESSED: DWORD = 0x0001;
+        pub const RIGHTMOST_BUTTON_PRESSED: DWORD = 0x0002;
+        pub const FROM_LEFT_2ND_BUTTON_PRESSED: DWORD = 0x0004;
+        pub const FROM_LEFT_3RD_BUTTON_PRESSED: DWORD = 0x0008;
+        pub const FROM_LEFT_4TH_BUTTON_PRESSED: DWORD = 0x0010;
+        pub const MOUSE_MOVED: DWORD = 0x0001;
+        pub const DOUBLE_CLICK: DWORD = 0x0002;
+        pub const MOUSE_WHEELED: DWORD = 0x0004;
+        pub const MOUSE_HWHEELED: DWORD = 0x0008;
+
+        pub const FOREGROUND_BLUE: WORD = 0x0001;
+        pub const FOREGROUND_GREEN: WORD = 0x0002;
+        pub const FOREGROUND_RED: WORD = 0x0004;
+        pub const FOREGROUND_INTENSITY: WORD = 0x0008;
+        pub const BACKGROUND_BLUE: WORD = 0x0010;
+        pub const BACKGROUND_GREEN: WORD = 0x0020;
+        pub const BACKGROUND_RED: WORD = 0x0040;
+        pub const BACKGROUND_INTENSITY: WORD = 0x0080;
+        pub const COMMON_LVB_LEADING_BYTE: WORD = 0x0100;
+        pub const COMMON_LVB_TRAILING_BYTE: WORD = 0x0200;
+        pub const COMMON_LVB_GRID_HORIZONTAL: WORD = 0x0400;
+        pub const COMMON_LVB_GRID_LVERTICAL: WORD = 0x0800;
+        pub const COMMON_LVB_GRID_RVERTICAL: WORD = 0x1000;
+        pub const COMMON_LVB_REVERSE_VIDEO: WORD = 0x4000;
+        pub const COMMON_LVB_UNDERSCORE: WORD = 0x8000;
+        pub const COMMON_LVB_SBCSDBCS: WORD = 0x0300;
+
+        FN!{stdcall PHANDLER_ROUTINE(
+            CtrlType: DWORD,
+        ) -> BOOL}
+
+        STRUCT!{struct INPUT_RECORD {
+            EventType: WORD,
+            Event: INPUT_RECORD_Event,
+        }}
+
+        pub type PINPUT_RECORD = *mut INPUT_RECORD;
+        pub const KEY_EVENT: WORD = 0x0001;
+        pub const MOUSE_EVENT: WORD = 0x0002;
+        pub const WINDOW_BUFFER_SIZE_EVENT: WORD = 0x0004;
+        pub const MENU_EVENT: WORD = 0x0008;
+        pub const FOCUS_EVENT: WORD = 0x0010;
+
+        STRUCT!{struct SECURITY_ATTRIBUTES {
+            nLength: DWORD,
+            lpSecurityDescriptor: LPVOID,
+            bInheritHandle: BOOL,
+        }}
+
+        STRUCT!{struct COORD {
+            X: SHORT,
+            Y: SHORT,
+        }}
+
+        pub type PSECURITY_ATTRIBUTES = *mut SECURITY_ATTRIBUTES;
+        pub type LPSECURITY_ATTRIBUTES = *mut SECURITY_ATTRIBUTES;
 
         #[link(name = "kernel32")]
         unsafe extern "system"
@@ -191,6 +305,7 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
             *
         };
 
@@ -208,6 +323,7 @@ pub mod um
     {
         use crate::
         {
+            ctypes::{ * },
             *
         };
 
@@ -431,7 +547,8 @@ pub mod shared
     {
         use crate::
         {
-            *
+            ctypes::{ * },
+            *,
         };
 
         pub type CHAR = c_char;
@@ -458,6 +575,7 @@ pub mod shared
     {
         use crate::
         {
+            ctypes::{ * },
             *
         };
 
