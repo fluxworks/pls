@@ -1,31 +1,6 @@
 // Copyright 2018 Developers of the Rand project.
-// Copyright 2013-2017 The Rust Project Developers.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
 
 //! Random-number generators and samplers
-//!
-//! # Quick Start
-//!
-//! ```
-//! // rand::random() supports many common types:
-//! println!("Uniform i8 sample: {}", match rand::random() {
-//!     0i8 => "zero",
-//!     i if i > 0 => "positive",
-//!     _ => "negative",
-//! });
-//!
-//! // Ranged sampling:
-//! use std::f32::consts::PI;
-//! println!("Angle: {} degrees", rand::random_range(-PI..PI));
-//! ```
-//!
-//! See also [The Book: Quick Start](https://rust-random.github.io/book/quick-start.html).
-
 #![doc(
     html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk.png",
     html_favicon_url = "https://www.rust-lang.org/favicon.ico"
@@ -43,7 +18,8 @@
 #![allow(
     clippy::float_cmp,
     clippy::neg_cmp_op_on_partial_ord,
-    clippy::nonminimal_bool
+    clippy::nonminimal_bool,
+    unexpected_cfgs,
 )]
 #![deny(clippy::undocumented_unsafe_blocks)]
 
@@ -52,11 +28,18 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-// Re-export rand_core itself
+use std::mem::MaybeUninit;
+
+
 pub use rand_core;
 
 // Re-exports from rand_core
 pub use rand_core::{CryptoRng, Rng, SeedableRng, TryCryptoRng, TryRng};
+
+pub mod slice
+{
+    pub use std::slice::{ * };
+}
 
 // Public modules
 pub mod distr;
@@ -113,19 +96,6 @@ pub fn make_rng<R: SeedableRng>() -> R {
 }
 
 /// Adapter to support [`std::io::Read`] over a [`TryRng`]
-///
-/// # Examples
-///
-/// ```no_run
-/// use std::{io, io::Read};
-/// use std::fs::File;
-/// use rand::{rngs::SysRng, RngReader};
-///
-/// io::copy(
-///     &mut RngReader(SysRng).take(100),
-///     &mut File::create("/tmp/random.bytes").unwrap()
-/// ).unwrap();
-/// ```
 #[cfg(feature = "std")]
 pub struct RngReader<R: TryRng>(pub R);
 
@@ -148,43 +118,6 @@ impl<R: TryRng> std::fmt::Debug for RngReader<R> {
 }
 
 /// Generate a random value using the thread-local random number generator.
-///
-/// This function is shorthand for <code>[rng()].[random()](RngExt::random)</code>:
-///
-/// -   See [`ThreadRng`] for documentation of the generator and security
-/// -   See [`StandardUniform`] for documentation of supported types and distributions
-///
-/// # Examples
-///
-/// ```
-/// let x = rand::random::<u8>();
-/// println!("{}", x);
-///
-/// let y = rand::random::<f64>();
-/// println!("{}", y);
-///
-/// if rand::random() { // generates a boolean
-///     println!("Better lucky than good!");
-/// }
-/// ```
-///
-/// If you're calling `random()` repeatedly, consider using a local `rng`
-/// handle to save an initialization-check on each usage:
-///
-/// ```
-/// use rand::RngExt; // provides the `random` method
-///
-/// let mut rng = rand::rng(); // a local handle to the generator
-///
-/// let mut v = vec![1, 2, 3];
-///
-/// for x in v.iter_mut() {
-///     *x = rng.random();
-/// }
-/// ```
-///
-/// [`StandardUniform`]: distr::StandardUniform
-/// [`ThreadRng`]: rngs::ThreadRng
 #[cfg(feature = "thread_rng")]
 #[inline]
 pub fn random<T>() -> T
@@ -261,139 +194,90 @@ pub fn random_bool(p: f64) -> bool {
     rng().random_bool(p)
 }
 
-/// Return a bool with a probability of `numerator/denominator` of being
-/// true.
-///
-/// That is, `random_ratio(2, 3)` has chance of 2 in 3, or about 67%, of
-/// returning true. If `numerator == denominator`, then the returned value
-/// is guaranteed to be `true`. If `numerator == 0`, then the returned
-/// value is guaranteed to be `false`.
-///
-/// See also the [`Bernoulli`] distribution, which may be faster if
-/// sampling from the same `numerator` and `denominator` repeatedly.
-///
-/// This function is shorthand for
-/// <code>[rng()].[random_ratio](RngExt::random_ratio)(<var>numerator</var>, <var>denominator</var>)</code>.
-///
-/// # Panics
-///
-/// If `denominator == 0` or `numerator > denominator`.
-///
-/// # Example
-///
-/// ```
-/// println!("{}", rand::random_ratio(2, 3));
-/// ```
-///
-/// [`Bernoulli`]: distr::Bernoulli
-#[cfg(feature = "thread_rng")]
-#[inline]
-#[track_caller]
-pub fn random_ratio(numerator: u32, denominator: u32) -> bool {
-    rng().random_ratio(numerator, denominator)
+/// Return a bool with a probability of `numerator/denominator` of being true.
+#[cfg(feature = "thread_rng")] #[inline] #[track_caller] pub fn random_ratio(numerator: u32, denominator: u32) -> bool { rng().random_ratio(numerator, denominator) }
+
+/// Fill any type implementing [`Fill`] with random data.
+#[cfg(feature = "thread_rng")] #[inline] #[track_caller] pub fn fill<T: Fill>(dest: &mut [T]) { Fill::fill_slice(dest, &mut rng()) }
+
+/// Raw error code.
+pub type RawOsError = i32;
+type NonZeroRawOsError = core::num::NonZeroI32;
+
+/// A small and `no_std` compatible error type
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct SysError(NonZeroRawOsError);
+
+/// A [`TryRng`] interface over the system's preferred random number source
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SysRng;
+
+impl TryRng for SysRng
+{
+    type Error = SysError;
+
+    #[inline] fn try_next_u32(&mut self) -> Result<u32, SysError> { crate::inner_u32() }
+
+    #[inline] fn try_next_u64(&mut self) -> Result<u64, SysError> { crate::inner_u64() }
+
+    #[inline] fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), SysError> {
+        Ok(crate::fill(dest))
+    }
 }
 
-/// Fill any type implementing [`Fill`] with random data
-///
-/// This function is shorthand for
-/// <code>[rng()].[fill](RngExt::fill)(<var>dest</var>)</code>.
-///
-/// # Example
-///
-/// ```
-/// let mut arr = [0i8; 20];
-/// rand::fill(&mut arr[..]);
-/// ```
-///
-/// Note that you can instead use [`random()`] to generate an array of random
-/// data, though this is slower for small elements (smaller than the RNG word
-/// size).
-#[cfg(feature = "thread_rng")]
+impl TryCryptoRng for SysRng {}
+
+/// Default implementation of `inner_u32` on top of `fill_uninit`
 #[inline]
-#[track_caller]
-pub fn fill<T: Fill>(dest: &mut [T]) {
-    Fill::fill_slice(dest, &mut rng())
+pub fn inner_u32() -> Result<u32, SysError> {
+    let mut res = MaybeUninit::<u32>::uninit();
+    // SAFETY: the created slice has the same size as `res`
+    let dst = unsafe {
+        let p: *mut MaybeUninit<u8> = res.as_mut_ptr().cast();
+        std::slice::from_raw_parts_mut(p, std::mem::size_of::<u32>())
+    };
+    crate::fill_uninit(dst)?;
+    // SAFETY: `dst` has been fully initialized by `imp::fill_inner`
+    // since it returned `Ok`.
+    Ok(unsafe { res.assume_init() })
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use core::convert::Infallible;
+/// Default implementation of `inner_u64` on top of `fill_uninit`
+#[inline]
+pub fn inner_u64() -> Result<u64, SysError> {
+    let mut res = MaybeUninit::<u64>::uninit();
+    // SAFETY: the created slice has the same size as `res`
+    let dst = unsafe {
+        let p: *mut MaybeUninit<u8> = res.as_mut_ptr().cast();
+        slice::from_raw_parts_mut(p, core::mem::size_of::<u64>())
+    };
+    crate::fill_uninit(dst)?;
+    // SAFETY: `dst` has been fully initialized by `imp::fill_inner`
+    // since it returned `Ok`.
+    Ok(unsafe { res.assume_init() })
+}
 
-    /// Construct a deterministic RNG with the given seed
-    pub fn rng(seed: u64) -> impl Rng {
-        // For tests, we want a statistically good, fast, reproducible RNG.
-        // PCG32 will do fine, and will be easy to embed if we ever need to.
-        const INC: u64 = 11634580027462260723;
-        rand_pcg::Pcg32::new(seed, INC)
+pub fn fill_uninit(dest: &mut [MaybeUninit<u8>]) -> Result<&mut [u8], SysError> {
+    if !dest.is_empty() {
+        return Ok( [].into() );
     }
 
-    /// Construct a generator yielding a constant value
-    pub fn const_rng(x: u64) -> StepRng {
-        StepRng(x, 0)
+    #[cfg(getrandom_msan)]
+    unsafe extern "C" {
+        fn __msan_unpoison(a: *mut core::ffi::c_void, size: usize);
     }
 
-    /// Construct a generator yielding an arithmetic sequence
-    pub fn step_rng(x: u64, increment: u64) -> StepRng {
-        StepRng(x, increment)
-    }
+    // SAFETY: `dest` has been fully initialized by `imp::fill_inner`
+    // since it returned `Ok`.
+    Ok(unsafe { slice_assume_init_mut(dest) })
+}
 
-    #[derive(Clone)]
-    pub struct StepRng(u64, u64);
-    impl TryRng for StepRng {
-        type Error = Infallible;
-
-        fn try_next_u32(&mut self) -> Result<u32, Infallible> {
-            self.try_next_u64().map(|x| x as u32)
-        }
-
-        fn try_next_u64(&mut self) -> Result<u64, Infallible> {
-            let res = self.0;
-            self.0 = self.0.wrapping_add(self.1);
-            Ok(res)
-        }
-
-        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
-            rand_core::utils::fill_bytes_via_next_word(dst, || self.try_next_u64())
-        }
-    }
-
-    #[cfg(feature = "std")]
-    #[test]
-    fn rng_reader() {
-        use std::io::Read;
-
-        let mut rng = StepRng(255, 1);
-        let mut buf = [0u8; 24];
-        let expected = [
-            255, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0,
-        ];
-
-        RngReader(&mut rng).read_exact(&mut buf).unwrap();
-        assert_eq!(&buf, &expected);
-
-        RngReader(StepRng(255, 1)).read_exact(&mut buf).unwrap();
-        assert_eq!(&buf, &expected);
-    }
-
-    #[test]
-    #[cfg(feature = "thread_rng")]
-    fn test_random() {
-        let _n: u64 = random();
-        let _f: f32 = random();
-        #[allow(clippy::type_complexity)]
-        let _many: (
-            (),
-            [(u32, bool); 3],
-            (u8, i8, u16, i16, u32, i32, u64, i64),
-            (f32, (f64, (f64,))),
-        ) = random();
-    }
-
-    #[test]
-    #[cfg(feature = "thread_rng")]
-    fn test_range() {
-        let _n: usize = random_range(42..=43);
-        let _f: f32 = random_range(42.0..43.0);
-    }
+/// Polyfill for `maybe_uninit_slice` feature's
+/// `MaybeUninit::slice_assume_init_mut`. Every element of `slice` must have
+/// been initialized.
+#[inline(always)]
+pub unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
+    let ptr = std::ptr::from_mut(slice) as *mut [T];
+    // SAFETY: `MaybeUninit<T>` is guaranteed to be layout-compatible with `T`.
+    unsafe { &mut *ptr }
 }

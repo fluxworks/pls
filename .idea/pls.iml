@@ -6,8 +6,11 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/getrandom-0.4.2/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mortal-0.2.4/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mortal-0.2.4/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/crates/getrandom-0.4.2/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
+      <excludeFolder url="file://$MODULE_DIR$/crates/mortal-0.2.4/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

@@ -41,6 +41,93 @@ pub mod signal;
 pub mod terminal;
 pub mod util;
 
+#[macro_export] macro_rules! FN
+{
+    (stdcall $func:ident($($t:ty,)*) -> $ret:ty) => (
+        pub type $func = Option<unsafe extern "system" fn($($t,)*) -> $ret>;
+    );
+    (stdcall $func:ident($($p:ident: $t:ty,)*) -> $ret:ty) => (
+        pub type $func = Option<unsafe extern "system" fn($($p: $t,)*) -> $ret>;
+    );
+    (cdecl $func:ident($($t:ty,)*) -> $ret:ty) => (
+        pub type $func = Option<unsafe extern "C" fn($($t,)*) -> $ret>;
+    );
+    (cdecl $func:ident($($p:ident: $t:ty,)*) -> $ret:ty) => (
+        pub type $func = Option<unsafe extern "C" fn($($p: $t,)*) -> $ret>;
+    );
+}
+
+#[macro_export] macro_rules! STRUCT
+{
+    (#[debug] $($rest:tt)*) => (
+        STRUCT!{#[cfg_attr(feature = "impl-debug", derive(Debug))] $($rest)*}
+    );
+    ($(#[$attrs:meta])* struct $name:ident {
+        $($field:ident: $ftype:ty,)+
+    }) => (
+        #[repr(C)] #[derive(Copy)] $(#[$attrs])*
+        pub struct $name {
+            $(pub $field: $ftype,)+
+        }
+        impl Clone for $name {
+            #[inline]
+            fn clone(&self) -> $name { *self }
+        }
+    );
+}
+
+#[macro_export] macro_rules! UNION
+{
+    ($(#[$attrs:meta])* union $name:ident {
+        [$stype:ty; $ssize:expr],
+        $($variant:ident $variant_mut:ident: $ftype:ty,)+
+    }) => (
+        #[repr(C)] $(#[$attrs])*
+        pub struct $name([$stype; $ssize]);
+        impl Copy for $name {}
+        impl Clone for $name {
+            #[inline]
+            fn clone(&self) -> $name { *self }
+        }
+
+        impl $name {$(
+            #[inline]
+            pub unsafe fn $variant(&self) -> &$ftype {
+                &*(self as *const _ as *const $ftype)
+            }
+            #[inline]
+            pub unsafe fn $variant_mut(&mut self) -> &mut $ftype {
+                &mut *(self as *mut _ as *mut $ftype)
+            }
+        )+}
+    );
+    ($(#[$attrs:meta])* union $name:ident {
+        [$stype32:ty; $ssize32:expr] [$stype64:ty; $ssize64:expr],
+        $($variant:ident $variant_mut:ident: $ftype:ty,)+
+    }) => (
+        #[repr(C)] $(#[$attrs])* #[cfg(target_pointer_width = "32")]
+        pub struct $name([$stype32; $ssize32]);
+        #[repr(C)] $(#[$attrs])* #[cfg(target_pointer_width = "64")]
+        pub struct $name([$stype64; $ssize64]);
+        impl Copy for $name {}
+        impl Clone for $name {
+            #[inline]
+            fn clone(&self) -> $name { *self }
+        }
+
+        impl $name {$(
+            #[inline]
+            pub unsafe fn $variant(&self) -> &$ftype {
+                &*(self as *const _ as *const $ftype)
+            }
+            #[inline]
+            pub unsafe fn $variant_mut(&mut self) -> &mut $ftype {
+                &mut *(self as *mut _ as *mut $ftype)
+            }
+        )+}
+    );
+}
+
 pub mod ctypes
 {
     pub use std::os::raw::c_void;
@@ -180,6 +267,13 @@ pub mod um
         use crate::
         {
             ctypes::{ * },
+            um::
+            {
+                winnt::
+                {
+
+                },
+            },
             *
         };
 
@@ -201,7 +295,11 @@ pub mod um
         use crate::
         {
             ctypes::{ * },
-            shared::ntdef::{ * },
+            shared::
+            {
+                minwindef::{BOOL, DWORD, WORD},
+                ntdef::{ * },
+            },
             *
         };
 
@@ -253,6 +351,49 @@ pub mod um
             CtrlType: DWORD,
         ) -> BOOL}
 
+        STRUCT!{struct MENU_EVENT_RECORD {
+            dwCommandId: UINT,
+        }}
+
+        STRUCT!{struct FOCUS_EVENT_RECORD {
+            bSetFocus: BOOL,
+        }}
+
+        STRUCT!{struct WINDOW_BUFFER_SIZE_RECORD {
+            dwSize: COORD,
+        }}
+
+        STRUCT!{struct MOUSE_EVENT_RECORD {
+            dwMousePosition: COORD,
+            dwButtonState: DWORD,
+            dwControlKeyState: DWORD,
+            dwEventFlags: DWORD,
+        }}
+
+        UNION!{union KEY_EVENT_RECORD_uChar {
+            [u16; 1],
+            UnicodeChar UnicodeChar_mut: WCHAR,
+            AsciiChar AsciiChar_mut: CHAR,
+        }}
+
+        STRUCT!{struct KEY_EVENT_RECORD {
+            bKeyDown: BOOL,
+            wRepeatCount: WORD,
+            wVirtualKeyCode: WORD,
+            wVirtualScanCode: WORD,
+            uChar: KEY_EVENT_RECORD_uChar,
+            dwControlKeyState: DWORD,
+        }}
+
+        UNION!{union INPUT_RECORD_Event {
+            [u32; 4],
+            KeyEvent KeyEvent_mut: KEY_EVENT_RECORD,
+            MouseEvent MouseEvent_mut: MOUSE_EVENT_RECORD,
+            WindowBufferSizeEvent WindowBufferSizeEvent_mut: WINDOW_BUFFER_SIZE_RECORD,
+            MenuEvent MenuEvent_mut: MENU_EVENT_RECORD,
+            FocusEvent FocusEvent_mut: FOCUS_EVENT_RECORD,
+        }}
+
         STRUCT!{struct INPUT_RECORD {
             EventType: WORD,
             Event: INPUT_RECORD_Event,
@@ -264,6 +405,30 @@ pub mod um
         pub const WINDOW_BUFFER_SIZE_EVENT: WORD = 0x0004;
         pub const MENU_EVENT: WORD = 0x0008;
         pub const FOCUS_EVENT: WORD = 0x0010;
+
+        pub const CONSOLE_TEXTMODE_BUFFER: DWORD = 1;
+
+        pub const CTRL_C_EVENT: DWORD = 0;
+        pub const CTRL_BREAK_EVENT: DWORD = 1;
+        pub const CTRL_CLOSE_EVENT: DWORD = 2;
+        pub const CTRL_LOGOFF_EVENT: DWORD = 5;
+        pub const CTRL_SHUTDOWN_EVENT: DWORD = 6;
+
+        pub const ENABLE_PROCESSED_INPUT: DWORD = 0x0001;
+        pub const ENABLE_LINE_INPUT: DWORD = 0x0002;
+        pub const ENABLE_ECHO_INPUT: DWORD = 0x0004;
+        pub const ENABLE_WINDOW_INPUT: DWORD = 0x0008;
+        pub const ENABLE_MOUSE_INPUT: DWORD = 0x0010;
+        pub const ENABLE_INSERT_MODE: DWORD = 0x0020;
+        pub const ENABLE_QUICK_EDIT_MODE: DWORD = 0x0040;
+        pub const ENABLE_EXTENDED_FLAGS: DWORD = 0x0080;
+        pub const ENABLE_AUTO_POSITION: DWORD = 0x0100;
+        pub const ENABLE_VIRTUAL_TERMINAL_INPUT: DWORD = 0x0200;
+        pub const ENABLE_PROCESSED_OUTPUT: DWORD = 0x0001;
+        pub const ENABLE_WRAP_AT_EOL_OUTPUT: DWORD = 0x0002;
+        pub const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
+
+        pub const DISABLE_NEWLINE_AUTO_RETURN: DWORD = 0x0008;
 
         STRUCT!{struct SECURITY_ATTRIBUTES {
             nLength: DWORD,
@@ -279,6 +444,41 @@ pub mod um
         pub type PSECURITY_ATTRIBUTES = *mut SECURITY_ATTRIBUTES;
         pub type LPSECURITY_ATTRIBUTES = *mut SECURITY_ATTRIBUTES;
 
+        STRUCT!{struct SMALL_RECT {
+            Left: SHORT,
+            Top: SHORT,
+            Right: SHORT,
+            Bottom: SHORT,
+        }}
+
+        STRUCT!{struct CONSOLE_SCREEN_BUFFER_INFO {
+            dwSize: COORD,
+            dwCursorPosition: COORD,
+            wAttributes: WORD,
+            srWindow: SMALL_RECT,
+            dwMaximumWindowSize: COORD,
+        }}
+
+        pub type PCONSOLE_SCREEN_BUFFER_INFO = *mut CONSOLE_SCREEN_BUFFER_INFO;
+
+        STRUCT!{struct CONSOLE_CURSOR_INFO {
+            dwSize: DWORD,
+            bVisible: BOOL,
+        }}
+
+        pub type PCONSOLE_CURSOR_INFO = *mut CONSOLE_CURSOR_INFO;
+
+        UNION!{union CHAR_INFO_Char {
+            [u16; 1],
+            UnicodeChar UnicodeChar_mut: WCHAR,
+            AsciiChar AsciiChar_mut: CHAR,
+        }}
+
+        STRUCT!{struct CHAR_INFO {
+            Char: CHAR_INFO_Char,
+            Attributes: WORD,
+        }}
+
         #[link(name = "kernel32")]
         unsafe extern "system"
         {
@@ -292,13 +492,9 @@ pub mod um
             pub fn SetConsoleCursorPosition( hConsoleOutput: HANDLE, dwCursorPosition: COORD ) -> BOOL;
             pub fn SetConsoleScreenBufferSize( hConsoleOutput: HANDLE, dwSize: COORD ) -> BOOL;
             pub fn SetConsoleTextAttribute( hConsoleOutput: HANDLE, wAttributes: WORD ) -> BOOL;
+            pub fn SetConsoleWindowInfo( hConsoleOutput: HANDLE, bAbsolute: BOOL, lpConsoleWindow: *const SMALL_RECT ) -> BOOL;
             pub fn WriteConsoleInputW( hConsoleInput: HANDLE, lpBuffer: *const INPUT_RECORD, nLength: DWORD, lpNumberOfEventsWritten: LPDWORD ) -> BOOL;
         }
-
-        STRUCT!{struct INPUT_RECORD {
-            EventType: WORD,
-            Event: INPUT_RECORD_Event,
-        }}
     }
 
     pub mod winnt
@@ -317,6 +513,12 @@ pub mod um
         pub const GENERIC_WRITE: DWORD = 0x40000000;
         pub const GENERIC_EXECUTE: DWORD = 0x20000000;
         pub const GENERIC_ALL: DWORD = 0x10000000;
+
+        pub const STATUS_WAIT_0: DWORD = 0x00000000;
+        pub const STATUS_ABANDONED_WAIT_0: DWORD = 0x00000080;
+        pub const STATUS_USER_APC: DWORD = 0x000000C0;
+        pub const STATUS_TIMEOUT: DWORD = 0x00000102;
+        pub const STATUS_PENDING: DWORD = 0x00000103;
     }
 
     pub mod winuser
@@ -539,8 +741,18 @@ pub mod shared
     {
         use crate::
         {
+            ctypes::{ * },
             *
         };
+
+        pub type BOOL = c_int;
+        pub type BYTE = c_uchar;
+        pub type DWORD = c_ulong;
+        pub type WORD = c_ushort;
+        pub type FLOAT = c_float;
+
+        pub const FALSE: BOOL = 0;
+        pub const TRUE: BOOL = 1;
     }
 
     pub mod ntdef
@@ -562,8 +774,11 @@ pub mod shared
     {
         use crate::
         {
+            ctypes::{ * },
             *
         };
+
+        use crate::um::wincon::INPUT_RECORD_Event;
 
         STRUCT!{struct INPUT_RECORD {
             EventType: WORD,
@@ -578,6 +793,8 @@ pub mod shared
             ctypes::{ * },
             *
         };
+
+        pub type HRESULT = c_long;
 
         pub const DXGI_ERROR_WAIT_TIMEOUT: HRESULT = 0x887A0027;
 

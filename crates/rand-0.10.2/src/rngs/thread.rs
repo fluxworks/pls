@@ -6,7 +6,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::thread_local;
 
-use super::{SysError, SysRng};
+use crate::{SysError, SysRng};
 use rand_core::SeedableRng;
 use rand_core::block::{BlockRng, Generator};
 use rand_core::{TryCryptoRng, TryRng};

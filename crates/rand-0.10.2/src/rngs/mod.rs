@@ -114,6 +114,6 @@ pub use self::thread::ThreadRng;
 
 #[cfg(feature = "chacha")]
 pub use chacha20::{ChaCha8Rng, ChaCha12Rng, ChaCha20Rng};
-
+/*
 #[cfg(feature = "sys_rng")]
-pub use getrandom::{Error as SysError, SysRng};
+pub use getrandom::{Error as SysError, SysRng}; */
