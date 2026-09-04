@@ -15,9 +15,6 @@ use crate::chars::DELETE;
 use crate::terminal::RawRead;
 
 // Generate some sequences for special characters.
-// The basic ones align with common Unix terminals, so that they match up with
-// default bindings. Ctrl/Shift/Alt combinations for arrow keys are somewhat
-// arbitrary, as Unix terminals can't seem to agree on those.
 const HOME_SEQ: &str = "\x1b[H";
 const END_SEQ: &str = "\x1b[F";
 const INSERT_SEQ: &str = "\x1b[2~";

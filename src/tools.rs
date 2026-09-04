@@ -5,8 +5,8 @@ use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::IntoRawFd;
+//use std::os::unix::fs::OpenOptionsExt;
+//use std::os::unix::io::IntoRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 

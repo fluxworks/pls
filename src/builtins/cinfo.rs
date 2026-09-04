@@ -35,8 +35,8 @@ pub fn run(_sh: &mut Shell, cl: &CommandLine, cmd: &Command, capture: bool) -> C
         info.push(("git-branch", &branch));
     }
 
-    info.push(("built-with", env!("BUILD_RUSTC_VERSION")));
-    info.push(("built-at", env!("BUILD_DATE")));
+    info.push(("built-with", ""));
+    info.push(("built-at", ""));
 
     let mut lines = Vec::new();
     for (k, v) in &info {

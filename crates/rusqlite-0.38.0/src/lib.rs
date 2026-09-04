@@ -1236,5 +1236,640 @@ impl InterruptHandle {
     }
 }
 */
-#[cfg(doctest)]
-doc_comment::doctest!("../README.md");
+pub mod cell
+{
+    pub use std::cell::{ * };
+}
+
+pub mod database
+{
+    use crate::
+    {
+        *,
+    };
+
+    pub struct Database
+    {
+
+    }
+
+    impl Database
+    {
+
+    }
+}
+
+pub mod connection
+{
+    use crate::
+    {
+        cell::{ RefCell },
+        database::{ Database },
+        sync::{Arc, Mutex},
+        *,
+    };
+
+    pub struct InnerConnection
+    {
+        pub db: *mut Database,
+        interrupt_lock: Arc<Mutex<*mut Database>>,
+        pub commit_hook: Option<Box<dyn FnMut() -> bool + Send>>,
+        pub rollback_hook: Option<Box<dyn FnMut() + Send>>,
+        pub update_hook: Option<Box<dyn FnMut(crate::hooks::Action, &str, &str, i64) + Send>>,
+        pub progress_handler: Option<Box<dyn FnMut() -> bool + Send>>,
+        pub authorizer: Option<crate::hooks::BoxedAuthorizer>,
+        pub preupdate_hook: Option<Box<dyn FnMut(crate::hooks::Action, &str, &str, &crate::hooks::PreUpdateCase) + Send>,>,
+        owned: bool,
+    }
+
+    pub struct Connection
+    {
+        db: RefCell<InnerConnection>,
+        cache: StatementCache,
+        transaction_behavior: TransactionBehavior,
+    }
+}
+
+pub mod hooks
+{
+    use crate::
+    {
+        *,
+    };
+}
+
+pub mod statement
+{
+    use std::cell::RefCell;
+    use std::sync::Arc;
+    use crate::
+    {
+        *,
+    };
+
+    /// Prepared statements LRU cache.
+    #[derive(Debug)]
+    pub struct StatementCache(RefCell<LruCache<Arc<str>, RawStatement>>);
+
+    unsafe impl Send for StatementCache {}
+
+    pub mod raw
+    {
+        use crate::
+        {
+            *,
+        };
+    }
+}
+
+pub mod hash
+{
+    pub use std::hash::{ * };
+    /*
+    hashlink v0.12.1
+    hashbrown v0.15.5
+    foldhash v0.2.0 */
+    #[inline(always)]
+    const fn folded_multiply(x: u64, y: u64) -> u64 {
+        // The following code path is only fast if 64-bit to 128-bit widening
+        // multiplication is supported by the architecture. Most 64-bit
+        // architectures except SPARC64 and Wasm64 support it. However, the target
+        // pointer width doesn't always indicate that we are dealing with a 64-bit
+        // architecture, as there are ABIs that reduce the pointer width, especially
+        // on AArch64 and x86-64. WebAssembly (regardless of pointer width) supports
+        // 64-bit to 128-bit widening multiplication with the `wide-arithmetic`
+        // proposal.
+        #[cfg(any(
+            all(
+                target_pointer_width = "64",
+                not(any(target_arch = "sparc64", target_arch = "wasm64")),
+            ),
+            target_arch = "aarch64",
+            target_arch = "x86_64",
+            all(target_family = "wasm", target_feature = "wide-arithmetic"),
+        ))]
+        {
+            // We compute the full u64 x u64 -> u128 product, this is a single mul
+            // instruction on x86-64, one mul plus one mulhi on ARM64.
+            let full = (x as u128).wrapping_mul(y as u128);
+            let lo = full as u64;
+            let hi = (full >> 64) as u64;
+
+            // The middle bits of the full product fluctuate the most with small
+            // changes in the input. This is the top bits of lo and the bottom bits
+            // of hi. We can thus make the entire output fluctuate with small
+            // changes to the input by XOR'ing these two halves.
+            lo ^ hi
+        }
+
+        #[cfg(not(any(
+            all(
+                target_pointer_width = "64",
+                not(any(target_arch = "sparc64", target_arch = "wasm64")),
+            ),
+            target_arch = "aarch64",
+            target_arch = "x86_64",
+            all(target_family = "wasm", target_feature = "wide-arithmetic"),
+        )))]
+        {
+            // u64 x u64 -> u128 product is quite expensive on 32-bit.
+            // We approximate it by expanding the multiplication and eliminating
+            // carries by replacing additions with XORs:
+            //    (2^32 hx + lx)*(2^32 hy + ly) =
+            //    2^64 hx*hy + 2^32 (hx*ly + lx*hy) + lx*ly ~=
+            //    2^64 hx*hy ^ 2^32 (hx*ly ^ lx*hy) ^ lx*ly
+            // Which when folded becomes:
+            //    (hx*hy ^ lx*ly) ^ (hx*ly ^ lx*hy).rotate_right(32)
+
+            let lx = x as u32;
+            let ly = y as u32;
+            let hx = (x >> 32) as u32;
+            let hy = (y >> 32) as u32;
+
+            let ll = (lx as u64).wrapping_mul(ly as u64);
+            let lh = (lx as u64).wrapping_mul(hy as u64);
+            let hl = (hx as u64).wrapping_mul(ly as u64);
+            let hh = (hx as u64).wrapping_mul(hy as u64);
+
+            (hh ^ ll) ^ (hl ^ lh).rotate_right(32)
+        }
+    }
+
+    #[inline(always)]
+    const fn rotate_right(x: u64, r: u32) -> u64 {
+        #[cfg(any(
+            target_pointer_width = "64",
+            target_arch = "aarch64",
+            target_arch = "x86_64",
+            target_family = "wasm",
+        ))]
+        {
+            x.rotate_right(r)
+        }
+
+        #[cfg(not(any(
+            target_pointer_width = "64",
+            target_arch = "aarch64",
+            target_arch = "x86_64",
+            target_family = "wasm",
+        )))]
+        {
+            // On platforms without 64-bit arithmetic rotation can be slow, rotate
+            // each 32-bit half independently.
+            let lo = (x as u32).rotate_right(r);
+            let hi = ((x >> 32) as u32).rotate_right(r);
+            ((hi as u64) << 32) | lo as u64
+        }
+    }
+
+    #[cold]
+    fn cold_path() {}
+
+    /// Hashes strings <= 16 bytes, has unspecified behavior when bytes.len() > 16.
+    #[inline(always)]
+    fn hash_bytes_short(bytes: &[u8], accumulator: u64, seeds: &[u64; 6]) -> u64 {
+        let len = bytes.len();
+        let mut s0 = accumulator;
+        let mut s1 = seeds[1];
+        // XOR the input into s0, s1, then multiply and fold.
+        if len >= 8 {
+            s0 ^= u64::from_ne_bytes(bytes[0..8].try_into().unwrap());
+            s1 ^= u64::from_ne_bytes(bytes[len - 8..].try_into().unwrap());
+        } else if len >= 4 {
+            s0 ^= u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as u64;
+            s1 ^= u32::from_ne_bytes(bytes[len - 4..].try_into().unwrap()) as u64;
+        } else if len > 0 {
+            let lo = bytes[0];
+            let mid = bytes[len / 2];
+            let hi = bytes[len - 1];
+            s0 ^= lo as u64;
+            s1 ^= ((hi as u64) << 8) | mid as u64;
+        }
+        folded_multiply(s0, s1)
+    }
+
+    /// Load 8 bytes into a u64 word at the given offset.
+    ///
+    /// # Safety
+    /// You must ensure that offset + 8 <= bytes.len().
+    #[inline(always)]
+    unsafe fn load(bytes: &[u8], offset: usize) -> u64 {
+        unsafe { bytes.as_ptr().add(offset).cast::<u64>().read_unaligned() }
+    }
+
+    /// Hashes strings > 16 bytes.
+    ///
+    /// # Safety
+    /// v.len() must be > 16 bytes.
+    #[cold]
+    #[inline(never)]
+    unsafe fn hash_bytes_long(mut v: &[u8], accumulator: u64, seeds: &[u64; 6]) -> u64 {
+        let mut s0 = accumulator;
+        let mut s1 = s0.wrapping_add(seeds[1]);
+
+        if v.len() > 128 {
+            cold_path();
+            let mut s2 = s0.wrapping_add(seeds[2]);
+            let mut s3 = s0.wrapping_add(seeds[3]);
+
+            if v.len() > 256 {
+                cold_path();
+                let mut s4 = s0.wrapping_add(seeds[4]);
+                let mut s5 = s0.wrapping_add(seeds[5]);
+                loop {
+                    unsafe {
+                        // SAFETY: we checked the length is > 256, we index at most v[..96].
+                        s0 = folded_multiply(load(v, 0) ^ s0, load(v, 48) ^ seeds[0]);
+                        s1 = folded_multiply(load(v, 8) ^ s1, load(v, 56) ^ seeds[0]);
+                        s2 = folded_multiply(load(v, 16) ^ s2, load(v, 64) ^ seeds[0]);
+                        s3 = folded_multiply(load(v, 24) ^ s3, load(v, 72) ^ seeds[0]);
+                        s4 = folded_multiply(load(v, 32) ^ s4, load(v, 80) ^ seeds[0]);
+                        s5 = folded_multiply(load(v, 40) ^ s5, load(v, 88) ^ seeds[0]);
+                    }
+                    v = &v[96..];
+                    if v.len() <= 256 {
+                        break;
+                    }
+                }
+                s0 ^= s4;
+                s1 ^= s5;
+            }
+
+            loop {
+                unsafe {
+                    s0 = folded_multiply(load(v, 0) ^ s0, load(v, 32) ^ seeds[0]);
+                    s1 = folded_multiply(load(v, 8) ^ s1, load(v, 40) ^ seeds[0]);
+                    s2 = folded_multiply(load(v, 16) ^ s2, load(v, 48) ^ seeds[0]);
+                    s3 = folded_multiply(load(v, 24) ^ s3, load(v, 56) ^ seeds[0]);
+                }
+                v = &v[64..];
+                if v.len() <= 128 {
+                    break;
+                }
+            }
+            s0 ^= s2;
+            s1 ^= s3;
+        }
+
+        let len = v.len();
+
+        unsafe
+        {
+            s0 = folded_multiply(load(v, 0) ^ s0, load(v, len - 16) ^ seeds[0]);
+            s1 = folded_multiply(load(v, 8) ^ s1, load(v, len - 8) ^ seeds[0]);
+            if len >= 32 {
+                s0 = folded_multiply(load(v, 16) ^ s0, load(v, len - 32) ^ seeds[0]);
+                s1 = folded_multiply(load(v, 24) ^ s1, load(v, len - 24) ^ seeds[0]);
+                if len >= 64 {
+                    s0 = folded_multiply(load(v, 32) ^ s0, load(v, len - 48) ^ seeds[0]);
+                    s1 = folded_multiply(load(v, 40) ^ s1, load(v, len - 40) ^ seeds[0]);
+                    if len >= 96 {
+                        s0 = folded_multiply(load(v, 48) ^ s0, load(v, len - 64) ^ seeds[0]);
+                        s1 = folded_multiply(load(v, 56) ^ s1, load(v, len - 56) ^ seeds[0]);
+                    }
+                }
+            }
+        }
+
+        s0 ^ s1
+    }
+    /// A random seed intended to be shared by many different foldhash instances.
+    #[derive(Clone, Debug)]
+    pub struct SharedSeed
+    {
+        pub seeds: [u64; 6],
+    }
+    /*
+    hashbrown::DefaultHashBuilder::FoldHasher */
+    /// A [`Hasher`] instance implementing foldhash, optimized for speed.
+    pub struct DefaultHasher<'a>
+    {
+        accumulator: u64,
+        sponge: u128,
+        sponge_len: u8,
+        seeds: &'a [u64; 6],
+    }
+
+    impl<'a> DefaultHasher<'a>
+    {
+        /// Initializes this [`FoldHasher`] with the given per-hasher seed and [`SharedSeed`].
+        #[inline] pub const fn with_seed(per_hasher_seed: u64, shared_seed: &'a SharedSeed) -> DefaultHasher<'a>
+        {
+            DefaultHasher
+            {
+                accumulator: per_hasher_seed,
+                sponge: 0,
+                sponge_len: 0,
+                seeds: &shared_seed.seeds,
+            }
+        }
+
+        #[inline(always)]
+        fn write_num<T: Into<u128>>(&mut self, x: T) {
+            let bits: usize = 8 * core::mem::size_of::<T>();
+            if self.sponge_len as usize + bits > 128 {
+                let lo = self.sponge as u64;
+                let hi = (self.sponge >> 64) as u64;
+                self.accumulator = folded_multiply(lo ^ self.accumulator, hi ^ self.seeds[0]);
+                self.sponge = x.into();
+                self.sponge_len = bits as u8;
+            } else {
+                self.sponge |= x.into() << self.sponge_len;
+                self.sponge_len += bits as u8;
+            }
+        }
+    }
+
+    impl<'a> Hasher for DefaultHasher<'a> {
+        #[inline(always)]
+        fn write(&mut self, bytes: &[u8]) {
+            // We perform overlapping reads in the byte hash which could lead to
+            // trivial length-extension attacks. These should be defeated by
+            // adding a length-dependent rotation on our unpredictable seed
+            // which costs only a single cycle (or none if executed with
+            // instruction-level parallelism).
+            let len = bytes.len();
+            self.accumulator = rotate_right(self.accumulator, len as u32);
+            if len <= 16 {
+                self.accumulator = hash_bytes_short(bytes, self.accumulator, self.seeds);
+            } else {
+                unsafe {
+                    // SAFETY: we checked that the length is > 16 bytes.
+                    self.accumulator = hash_bytes_long(bytes, self.accumulator, self.seeds);
+                }
+            }
+        }
+
+        #[inline(always)]
+        fn write_u8(&mut self, i: u8) {
+            self.write_num(i);
+        }
+
+        #[inline(always)]
+        fn write_u16(&mut self, i: u16) {
+            self.write_num(i);
+        }
+
+        #[inline(always)]
+        fn write_u32(&mut self, i: u32) {
+            self.write_num(i);
+        }
+
+        #[inline(always)]
+        fn write_u64(&mut self, i: u64) {
+            self.write_num(i);
+        }
+
+        #[inline(always)]
+        fn write_u128(&mut self, i: u128) {
+            let lo = i as u64;
+            let hi = (i >> 64) as u64;
+            self.accumulator = folded_multiply(lo ^ self.accumulator, hi ^ self.seeds[0]);
+        }
+
+        #[inline(always)]
+        fn write_usize(&mut self, i: usize) {
+            // u128 doesn't implement From<usize>.
+            #[cfg(target_pointer_width = "32")]
+            self.write_num(i as u32);
+            #[cfg(target_pointer_width = "64")]
+            self.write_num(i as u64);
+        }
+
+        #[cfg(feature = "nightly")]
+        #[inline(always)]
+        fn write_str(&mut self, s: &str) {
+            // Our write function already handles length differences.
+            self.write(s.as_bytes())
+        }
+
+        #[inline(always)]
+        fn finish(&self) -> u64 {
+            if self.sponge_len > 0 {
+                let lo = self.sponge as u64;
+                let hi = (self.sponge >> 64) as u64;
+                folded_multiply(lo ^ self.accumulator, hi ^ self.seeds[0])
+            } else {
+                self.accumulator
+            }
+        }
+    }
+
+    /// An object representing an initialized global seed.
+    ///
+    /// Does not actually store the seed inside itself, it is a zero-sized type.
+    /// This prevents inflating the RandomState size and in turn HashMap's size.
+    #[derive(Copy, Clone, Debug)]
+    pub struct GlobalSeed {
+        // So we can't accidentally type GlobalSeed { } within this crate.
+        _no_accidental_unsafe_init: (),
+    }
+
+    impl GlobalSeed {
+        #[inline(always)]
+        pub fn new() -> Self {
+            if GLOBAL_SEED_STORAGE.state.load(Ordering::Acquire) != INIT {
+                Self::init_slow()
+            }
+            Self {
+                _no_accidental_unsafe_init: (),
+            }
+        }
+
+        #[cold]
+        #[inline(never)]
+        fn init_slow() {
+            // Generate seed outside of critical section.
+            let seed = generate_global_seed();
+
+            loop {
+                match GLOBAL_SEED_STORAGE.state.compare_exchange_weak(
+                    UNINIT,
+                    LOCKED,
+                    Ordering::Acquire,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => unsafe {
+                        // SAFETY: we just acquired an exclusive lock.
+                        *GLOBAL_SEED_STORAGE.seed.get() = seed;
+                        GLOBAL_SEED_STORAGE.state.store(INIT, Ordering::Release);
+                        return;
+                    },
+
+                    Err(INIT) => return,
+
+                    // Yes, it's a spin loop. We need to support no_std (so no easy
+                    // access to proper locks), this is a one-time-per-program
+                    // initialization, and the critical section is only a few
+                    // store instructions, so it'll be fine.
+                    _ => core::hint::spin_loop(),
+                }
+            }
+        }
+
+        #[inline(always)]
+        pub fn get(self) -> &'static SharedSeed {
+            // SAFETY: our constructor ensured we are in the INIT state and thus
+            // this raw read does not race with any write.
+            unsafe { &*GLOBAL_SEED_STORAGE.seed.get() }
+        }
+    }
+}
+
+    /// A [`BuildHasher`] for [`fast::FoldHasher`](FoldHasher) that is randomly initialized.
+    #[derive(Clone, Debug)]
+    pub struct RandomState {
+        per_hasher_seed: u64,
+        global_seed: GlobalSeed,
+    }
+
+    impl Default for RandomState {
+        #[inline(always)]
+        fn default() -> Self {
+            Self {
+                per_hasher_seed: gen_per_hasher_seed(),
+                global_seed: GlobalSeed::new(),
+            }
+        }
+    }
+
+    impl BuildHasher for RandomState {
+        type Hasher = FoldHasher<'static>;
+
+        #[inline(always)]
+        fn build_hasher(&self) -> FoldHasher<'static> {
+            FoldHasher::with_seed(self.per_hasher_seed, self.global_seed.get())
+        }
+    }
+
+    /// A [`BuildHasher`] for [`fast::FoldHasher`](FoldHasher) that is randomly
+    /// initialized by default, but can also be initialized with a specific seed.
+    ///
+    /// This can be useful for e.g. testing, but the downside is that this type
+    /// has a size of 16 bytes rather than the 8 bytes [`RandomState`] is.
+    #[derive(Clone, Debug)]
+    pub struct SeedableRandomState {
+        per_hasher_seed: u64,
+        shared_seed: &'static SharedSeed,
+    }
+
+    impl Default for SeedableRandomState {
+        #[inline(always)]
+        fn default() -> Self {
+            Self::random()
+        }
+    }
+
+    impl SeedableRandomState {
+        /// Generates a random [`SeedableRandomState`], similar to [`RandomState`].
+        #[inline(always)]
+        pub fn random() -> Self {
+            Self {
+                per_hasher_seed: gen_per_hasher_seed(),
+                shared_seed: SharedSeed::global_random(),
+            }
+        }
+
+        /// Generates a fixed [`SeedableRandomState`], similar to [`FixedState`].
+        #[inline(always)]
+        pub fn fixed() -> Self {
+            Self {
+                per_hasher_seed: ARBITRARY3,
+                shared_seed: SharedSeed::global_fixed(),
+            }
+        }
+
+        /// Generates a [`SeedableRandomState`] with the given per-hasher seed
+        /// and [`SharedSeed`].
+        #[inline(always)]
+        pub fn with_seed(per_hasher_seed: u64, shared_seed: &'static SharedSeed) -> Self {
+            // XOR with ARBITRARY3 such that with_seed(0) matches default.
+            Self {
+                per_hasher_seed: per_hasher_seed ^ ARBITRARY3,
+                shared_seed,
+            }
+        }
+    }
+
+    impl BuildHasher for SeedableRandomState {
+        type Hasher = FoldHasher<'static>;
+
+        #[inline(always)]
+        fn build_hasher(&self) -> FoldHasher<'static> {
+            FoldHasher::with_seed(self.per_hasher_seed, self.shared_seed)
+        }
+    }
+
+    /// A [`BuildHasher`] for [`fast::FoldHasher`](FoldHasher) that always has the same fixed seed.
+    ///
+    /// Not recommended unless you absolutely need determinism.
+    #[derive(Clone, Debug)]
+    pub struct FixedState {
+        per_hasher_seed: u64,
+    }
+
+    impl FixedState {
+        /// Creates a [`FixedState`] with the given per-hasher-seed.
+        #[inline(always)]
+        pub const fn with_seed(per_hasher_seed: u64) -> Self {
+            // XOR with ARBITRARY3 such that with_seed(0) matches default.
+            Self {
+                per_hasher_seed: per_hasher_seed ^ ARBITRARY3,
+            }
+        }
+    }
+
+    impl Default for FixedState {
+        #[inline(always)]
+        fn default() -> Self {
+            Self {
+                per_hasher_seed: ARBITRARY3,
+            }
+        }
+    }
+
+    impl BuildHasher for FixedState {
+        type Hasher = FoldHasher<'static>;
+
+        #[inline(always)]
+        fn build_hasher(&self) -> FoldHasher<'static> {
+            FoldHasher::with_seed(self.per_hasher_seed, SharedSeed::global_fixed())
+        }
+    }
+
+    /// Default hash builder, matches hashbrown's default hasher.
+    #[derive(Clone, Default, Debug)]
+    pub struct DefaultHashBuilder(DefaultHasher);
+}
+
+pub mod lru
+{
+    use crate::
+    {
+        *,
+    };
+
+    /// A version of `HashMap` that has a user controllable order for its entries.
+    pub struct LinkedHashMap<K, V, S = DefaultHashBuilder> {
+        table: HashTable<NonNull<Node<K, V>>>,
+        hash_builder: S,
+        values: Option<NonNull<Node<K, V>>>,
+        free: Option<NonNull<Node<K, V>>>,
+    }
+
+    pub struct LruCache<K, V, S = DefaultHashBuilder> {
+        map: LinkedHashMap<K, V, S>,
+        max_size: usize,
+    }
+
+}
+
+pub mod sync
+{
+    pub mod atomic
+    {
+        pub use std::sync::atomic::{ * };
+    }
+
+    pub use std::sync::{ * };
+}

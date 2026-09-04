@@ -1,14 +1,11 @@
 //! Provides a configurable, concurrent, extensible, interactive input reader for Unix terminals and Windows console.
 #![allow
 (
+    dead_code,
     nonstandard_style,
     unexpected_cfgs,
     unused_imports,
 )]
-
-#[cfg(test)]
-#[macro_use]
-extern crate assert_matches;
 
 pub use crate::command::Command;
 pub use crate::complete::{Completer, Completion, Suffix};
@@ -35,10 +32,5 @@ pub mod util;
 pub mod variables;
 pub mod writer;
 
-#[cfg(unix)]
-#[path = "unix/mod.rs"]
-mod sys;
-
-#[cfg(windows)]
 #[path = "windows/mod.rs"]
 mod sys;

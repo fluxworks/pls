@@ -48,61 +48,6 @@ impl ReseedingCore {
 }
 
 /// A reference to the thread-local generator
-///
-/// This type is a reference to a lazily-initialized thread-local generator.
-/// An instance can be obtained via [`rand::rng()`][crate::rng()] or via
-/// [`ThreadRng::default()`].
-/// The handle cannot be passed between threads (is not `Send` or `Sync`).
-///
-/// # Security
-///
-/// Security must be considered relative to a threat model and validation
-/// requirements. The Rand project can provide no guarantee of fitness for
-/// purpose. The design criteria for `ThreadRng` are as follows:
-///
-/// - Automatic seeding via [`SysRng`] and after every 64 kB of output.
-///   Limitation: there is no automatic reseeding on process fork (see [below](#fork)).
-/// - A rigorously analyzed, unpredictable (cryptographic) pseudo-random generator
-///   (see [the book on security](https://rust-random.github.io/book/guide-rngs.html#security)).
-///   The currently selected algorithm is ChaCha (12-rounds).
-///   See also [`StdRng`] documentation.
-/// - Not to leak internal state through [`Debug`] or serialization
-///   implementations.
-/// - No further protections exist to in-memory state. In particular, the
-///   implementation is not required to zero memory on exit (of the process or
-///   thread). (This may change in the future.)
-/// - Be fast enough for general-purpose usage. Note in particular that
-///   `ThreadRng` is designed to be a "fast, reasonably secure generator"
-///   (where "reasonably secure" implies the above criteria).
-///
-/// We leave it to the user to determine whether this generator meets their
-/// security requirements. For an alternative, see [`SysRng`].
-///
-/// # Forks and interrupts
-///
-/// `ThreadRng` is not automatically reseeded on fork. It is recommended to
-/// explicitly call [`ThreadRng::reseed`] immediately after a fork, for example:
-/// ```ignore
-/// fn do_fork() {
-///     let pid = unsafe { libc::fork() };
-///     if pid == 0 {
-///         // Reseed ThreadRng in child processes:
-///         rand::rng().reseed();
-///     }
-/// }
-/// ```
-///
-/// Methods on `ThreadRng` are not reentrant-safe and thus should not be called
-/// from an interrupt (e.g. a fork handler) unless it can be guaranteed that no
-/// other method on the same `ThreadRng` is currently executing.
-///
-/// # Panics
-///
-/// Implementations of [`TryRng`] and [`Rng`] panic in case of [`SysRng`]
-/// failure during reseeding (highly unlikely).
-///
-/// [`StdRng`]: crate::rngs::StdRng
-/// [`Rng`]: rand_core::Rng
 #[derive(Clone)]
 pub struct ThreadRng {
     // Rc is explicitly !Send and !Sync
@@ -174,7 +119,7 @@ impl TryRng for ThreadRng {
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Infallible> {
         // SAFETY: We must make sure to stop using `rng` before anyone else
         // creates another mutable reference
-        let rng = unsafe { &mut *self.rng.try_into() };
+        let rng = unsafe { &mut *self.rng.get() };
         rng.fill_bytes(dest);
         Ok(())
     }
