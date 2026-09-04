@@ -33,13 +33,13 @@ serde = ["dep:serde"]
 
 # Option (enabled by default): without "std" rand uses libcore; this option
 # enables functionality expected to be available on a standard platform.
-std = ["alloc", "getrandom?/std"]
+std = ["alloc"]
 
 # Option: "alloc" enables support for Vec and Box when not using "std"
 alloc = []
 
 # Option: enable SysRng
-sys_rng = ["dep:getrandom", "getrandom/sys_rng"]
+sys_rng = []
 
 # Option (requires nightly Rust): experimental SIMD support
 simd_support = []
@@ -65,7 +65,6 @@ log = []
 rand_core = { version = "0.10.0", default-features = false }
 serde = { version = "1.0.103", features = ["derive"], optional = true }
 chacha20 = { version = "0.10.0", default-features = false, features = ["rng"], optional = true }
-getrandom = { version = "0.4.0", path = "../getrandom-0.4.2", optional = true }
 
 [dev-dependencies]
 rand_pcg = "0.10"

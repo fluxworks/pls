@@ -1,7 +1,7 @@
 @echo off
-where dlltool.exe > nul 2>&1
+where BCryptPrimitive.dll > nul 2>&1
 if %errorlevel% equ 0 (
-    echo dlltool.exe found: Success!
+    echo BCryptPrimitive.dll found: Success!
 ) else (
-    echo Error: dlltool.exe not found. Please check MinGW installation and PATH.
+    echo Error: BCryptPrimitive.dll not found. Please check MinGW installation and PATH.
 )
