@@ -30,7 +30,8 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/murarth/mortal"
 
 [dependencies.bitflags]
-version = "2.0"
+path = "../bitflags-2.13.1"
+version = "2.13.1"
 
 [dependencies.smallstr]
 version = "0.2"

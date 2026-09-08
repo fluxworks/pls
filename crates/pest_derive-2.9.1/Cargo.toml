@@ -89,6 +89,7 @@ name = "surround"
 path = "tests/surround.rs"
 
 [dependencies.pest]
+path = "../pest-2.9.1"
 version = "2.9.1"
 default-features = false
 

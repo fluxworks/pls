@@ -73,7 +73,8 @@ version = "0.10"
 version = "0.11"
 
 [dev-dependencies.ucd-trie]
-version = "0.1"
+path = "../ucd-trie-0.1.7"
+version = "0.1.7"
 default-features = false
 
 [dev-dependencies.unicode-xid]

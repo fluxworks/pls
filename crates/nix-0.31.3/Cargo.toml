@@ -115,7 +115,8 @@ name = "test-prctl"
 path = "test/sys/test_prctl.rs"
 
 [dependencies.bitflags]
-version = "2.3.3"
+path = "../bitflags-2.13.1"
+version = "2.13.1"
 
 [dependencies.cfg-if]
 version = "1.0"

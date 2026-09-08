@@ -63,5 +63,6 @@ name = "bench"
 path = "benches/bench.rs"
 
 [dependencies.tinyvec]
-version = "1"
+path = "../tinyvec-1.13.2"
+version = "1.13.2"
 features = ["alloc"]

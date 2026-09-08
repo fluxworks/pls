@@ -57,9 +57,9 @@ version = "4.5"
 default-features = false
 features = ["std", "derive", "help"]
 
-[dependencies.rusqlite]
-version = "0.38"
-features = ["bundled"]
+#[dependencies.rusqlite]
+#version = "0.38"
+#features = ["bundled"]
 
 [dependencies.time]
 version = "0.3"

@@ -96,7 +96,8 @@ version = "1.0.85"
 optional = true
 
 [dependencies.ucd-trie]
-version = "0.1.5"
+path = "../ucd-trie-0.1.7"
+version = "0.1.7"
 default-features = false
 
 [dev-dependencies.criterion]

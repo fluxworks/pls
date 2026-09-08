@@ -79,7 +79,8 @@ features = ["stream-wrapper"]
 optional = true
 
 [dependencies.rand_core]
-version = "0.10"
+path = "../rand_core-0.10.1"
+version = "0.10.1"
 optional = true
 default-features = false
 
