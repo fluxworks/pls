@@ -26,8 +26,7 @@ version = "2.33"
 default-features = false
 
 [dependencies.lazy_static]
-path = "../lazy_static-1.5.0"
-version = "1.5.0"
+version = "1.4.0"
 
 [dependencies.paw_dep]
 version = "1"
@@ -35,9 +34,7 @@ optional = true
 package = "paw"
 
 [dependencies.structopt-derive]
-path = "../structopt-derive-0.4.18"
 version = "=0.4.18"
-
 [dev-dependencies.rustversion]
 version = "1"
 
@@ -60,6 +57,5 @@ paw = ["structopt-derive/paw", "paw_dep"]
 suggestions = ["clap/suggestions"]
 wrap_help = ["clap/wrap_help"]
 yaml = ["clap/yaml"]
-
 [badges.travis-ci]
 repository = "TeXitoi/structopt"

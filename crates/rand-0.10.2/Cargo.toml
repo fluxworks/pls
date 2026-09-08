@@ -62,9 +62,20 @@ unbiased = []
 log = []
 
 [dependencies]
-rand_core = { version = "0.10.0", default-features = false }
 serde = { version = "1.0.103", features = ["derive"], optional = true }
-chacha20 = { version = "0.10.0", default-features = false, features = ["rng"], optional = true }
+#getrandom = { version = "0.4.0", optional = true }
+
+[dependencies.rand_core]
+path = "../rand_core-0.10.1"
+version = "0.10.1"
+default-features = false
+
+[dependencies.chacha20]
+path = "../chacha20-0.10.2"
+version = "0.10.2"
+features = ["rng"]
+optional = true
+
 
 [dev-dependencies]
 rand_pcg = "0.10"

@@ -7,14 +7,17 @@ use std::time::Duration;
 use mortal::windows::TerminalExt;
 use mortal::{Event, TerminalReadGuard};
 
-use mortal::shared::minwindef::{DWORD, TRUE};
-use mortal::um::wincon::{self, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD};
-use mortal::um::winuser;
+use winapi::shared::minwindef::{DWORD, TRUE};
+use winapi::um::wincon::{self, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD};
+use winapi::um::winuser;
 
 use crate::chars::DELETE;
 use crate::terminal::RawRead;
 
 // Generate some sequences for special characters.
+// The basic ones align with common Unix terminals, so that they match up with
+// default bindings. Ctrl/Shift/Alt combinations for arrow keys are somewhat
+// arbitrary, as Unix terminals can't seem to agree on those.
 const HOME_SEQ: &str = "\x1b[H";
 const END_SEQ: &str = "\x1b[F";
 const INSERT_SEQ: &str = "\x1b[2~";
@@ -69,7 +72,7 @@ seq_group! { RIGHT_SEQ, "C" }
 seq_group! { LEFT_SEQ, "D" }
 
 pub fn terminal_read(term: &mut TerminalReadGuard, buf: &mut Vec<u8>) -> io::Result<RawRead> {
-    let mut events: [mortal::um::wincon::INPUT_RECORD; 1] = unsafe { zeroed() };
+    let mut events: [INPUT_RECORD; 1] = unsafe { zeroed() };
 
     let n = match term.read_raw_event(&mut events, Some(Duration::new(0, 0)))? {
         Some(Event::Raw(n)) => n,

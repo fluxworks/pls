@@ -58,7 +58,10 @@ std = []
 name = "unicode_normalization"
 path = "src/lib.rs"
 
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+
 [dependencies.tinyvec]
-path = "../tinyvec-1.11.0"
-version = "1.11.0"
+version = "1"
 features = ["alloc"]

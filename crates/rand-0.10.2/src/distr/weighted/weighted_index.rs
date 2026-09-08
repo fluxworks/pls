@@ -127,7 +127,7 @@ impl<X: SampleUniform + PartialOrd> WeightedIndex<X> {
         if total_weight == zero {
             return Err(Error::InsufficientNonZero);
         }
-        let distr = X::Sampler::new(zero, total_weight.clone()).map_err(|_| Error::Overflow)?;
+        let distr = X::Sampler::new(zero, total_weight.clone()).unwrap();
 
         Ok(WeightedIndex {
             cumulative_weights: weights,
@@ -152,7 +152,6 @@ impl<X: SampleUniform + PartialOrd> WeightedIndex<X> {
     ///     Note that due to floating-point loss of precision, this case is not
     ///     always correctly detected; usage of a fixed-point weight type may be
     ///     preferred.
-    /// -   [`Error::Overflow`] when the sum of all weights overflows.
     ///
     /// Updates take `O(N)` time. If you need to frequently update weights, consider
     /// [`rand_distr::weighted_tree`](https://docs.rs/rand_distr/*/rand_distr/weighted_tree/index.html)
@@ -204,8 +203,6 @@ impl<X: SampleUniform + PartialOrd> WeightedIndex<X> {
         if total_weight <= zero {
             return Err(Error::InsufficientNonZero);
         }
-        let weight_distribution =
-            X::Sampler::new(zero.clone(), total_weight.clone()).map_err(|_| Error::Overflow)?;
 
         // Update the weights. Because we checked all the preconditions in the
         // previous loop, this should never panic.
@@ -236,7 +233,7 @@ impl<X: SampleUniform + PartialOrd> WeightedIndex<X> {
         }
 
         self.total_weight = total_weight;
-        self.weight_distribution = weight_distribution;
+        self.weight_distribution = X::Sampler::new(zero, self.total_weight.clone()).unwrap();
 
         Ok(())
     }
@@ -468,10 +465,7 @@ mod test {
                 4
             );
         }
-    }
 
-    #[test]
-    fn weighted_index_new_errors() {
         assert_eq!(
             WeightedIndex::new(&[10][0..0]).unwrap_err(),
             Error::InvalidInput
@@ -489,10 +483,6 @@ mod test {
             Error::InvalidWeight
         );
         assert_eq!(WeightedIndex::new([-10]).unwrap_err(), Error::InvalidWeight);
-        assert_eq!(
-            WeightedIndex::new([f64::INFINITY]).unwrap_err(),
-            Error::Overflow
-        );
     }
 
     #[test]
@@ -522,15 +512,6 @@ mod test {
             assert_eq!(distr.total_weight, expected_distr.total_weight);
             assert_eq!(distr.cumulative_weights, expected_distr.cumulative_weights);
         }
-    }
-
-    #[test]
-    fn weighted_index_update_errors() {
-        let mut distr = WeightedIndex::new([1.0, 10.0]).unwrap();
-        assert_eq!(
-            distr.update_weights(&[(0, &f32::INFINITY)]).unwrap_err(),
-            Error::Overflow
-        );
     }
 
     #[test]
@@ -647,26 +628,5 @@ mod test {
     #[test]
     fn overflow() {
         assert_eq!(WeightedIndex::new([2, usize::MAX]), Err(Error::Overflow));
-    }
-
-    #[test]
-    fn overflow_float() {
-        assert_eq!(
-            WeightedIndex::new([f64::MAX, f64::MAX]),
-            Err(Error::Overflow)
-        );
-        assert_eq!(
-            WeightedIndex::new([f32::MAX, f32::MAX]),
-            Err(Error::Overflow)
-        );
-        assert_eq!(WeightedIndex::new([f64::INFINITY]), Err(Error::Overflow));
-
-        // In case of error, self is not modified.
-        let mut distr = WeightedIndex::new([1.0f64, 2.0]).unwrap();
-        assert_eq!(
-            distr.update_weights(&[(0, &f64::MAX), (1, &f64::MAX)]),
-            Err(Error::Overflow)
-        );
-        assert_eq!(distr, WeightedIndex::new([1.0f64, 2.0]).unwrap());
     }
 }

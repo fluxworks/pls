@@ -16,27 +16,9 @@ use core::char::{self, REPLACEMENT_CHARACTER};
 use core::ptr;
 use core::str;
 
-pub type Win32Error = u32;
-pub type FormatMessageOptions = u32;
-pub type BOOL = i32;
-pub type HRESULT = i32;
-pub type PSTR = *mut u8;
-pub type PWSTR = *mut u16;
-pub type PCSTR = *const u8;
-pub type PCWSTR = *const u16;
-pub type BSTR = *const u16;
-pub type HSTRING = *mut core::ffi::c_void;
+extern crate windows;
 
-pub const FORMAT_MESSAGE_FROM_SYSTEM: FormatMessageOptions = 4096u32;
-pub const FORMAT_MESSAGE_IGNORE_INSERTS: FormatMessageOptions = 512u32;
-
-#[link(name = "kernel32.dll")]
-unsafe extern "C"
-{
-    fn GetLastError() -> Win32Error;
-    fn SetLastError(dwerrcode : Win32Error);
-    fn FormatMessageW(dwflags : FormatMessageOptions, lpsource : *const core::ffi::c_void, dwmessageid : u32, dwlanguageid : u32, lpbuffer :PWSTR, nsize : u32, arguments : *const *const i8) -> u32;
-}
+use windows::{ GetLastError, SetLastError, WIN32_ERROR, FormatMessageW, FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS };
 
 use crate::Errno;
 
@@ -95,5 +77,5 @@ pub fn errno() -> Errno {
 }
 
 pub fn set_errno(Errno(errno): Errno) {
-    unsafe { SetLastError(errno as Win32Error) }
+    unsafe { SetLastError(errno as WIN32_ERROR) }
 }

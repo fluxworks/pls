@@ -34,10 +34,6 @@ categories = [
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/lambda-fairy/rust-errno"
 
-[profile.release]
-lto = true
-strip = true
-
 [features]
 default = ["std"]
 std = []
@@ -45,6 +41,10 @@ std = []
 [lib]
 name = "errno"
 path = "src/lib.rs"
+
+[target."cfg(windows)".dependencies.windows]
+path = "../windows-26.9.8"
+version = "26.9.8"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

@@ -1,15 +1,9 @@
 //! A simple wrapper around the C library's `execvp` function.
-//!
-//! For examples, see [the repository](https://github.com/faradayio/exec-rs).
-//!
-//! We'd love to fully integrate this with `std::process::Command`, but
-//! that module doesn't export sufficient hooks to allow us to add a new
-//! way to execute a program.
-
 #![allow
 (
     bare_trait_objects,
     unused_imports,
+    unused_mut,
 )]
 
 extern crate errno;
@@ -23,6 +17,9 @@ use std::iter::{IntoIterator, Iterator};
 use std::fmt;
 use std::ptr;
 //use std::os::unix::ffi::OsStrExt;
+use std::os::windows::ffi::OsStrExt;
+
+
 
 /// Represents an error calling `exec`.
 ///
@@ -84,6 +81,17 @@ macro_rules! exec_try {
     };
 }
 
+fn from_u16(from: &mut [u16]) -> &[u8] {
+    if cfg!(target_endian = "little") {
+        for byte in from.iter_mut() {
+            *byte = byte.to_be();
+        }
+    }
+
+    let len = from.len().checked_mul(2).unwrap();
+    let ptr: *const u8 = from.as_ptr().cast();
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+}
 /// Run `program` with `args`, completely replacing the currently running
 /// program.  If it returns at all, it always returns an error.
 ///
@@ -103,13 +111,22 @@ macro_rules! exec_try {
 pub fn execvp<S, I>(program: S, args: I) -> Error
     where S: AsRef<OsStr>, I: IntoIterator, I::Item: AsRef<OsStr>
 {
-    // Add null terminations to our strings and our argument array,
-    // converting them into a C-compatible format.
-    let program_cstring =
-        exec_try!(CString::new(program.as_ref().as_encoded_bytes()));
-    let arg_cstrings = exec_try!(args.into_iter().map(|arg| {
-        CString::new(arg.as_ref().as_encoded_bytes())
+    // Add null terminations to our strings and our argument array, converting them into a C-compatible format.
+    let reference = program.as_ref();
+    let mut result:Vec<u16> = reference.encode_wide().collect();
+    let mut bytes = from_u16( &mut result );
+
+    //exec_try!(CString::new(program.as_ref().as_bytes()));
+    let program_cstring = exec_try!(CString::new( bytes ));
+
+    let arg_cstrings = exec_try!(args.into_iter().map(|arg|
+    {
+        let refer = arg.as_ref();
+        let mut res:Vec<u16> = refer.encode_wide().collect();
+        let bytes = from_u16( &mut res );
+        CString::new( bytes )
     }).collect::<Result<Vec<_>, _>>());
+
     let mut arg_charptrs: Vec<_> = arg_cstrings.iter().map(|arg| {
         arg.as_ptr()
     }).collect();

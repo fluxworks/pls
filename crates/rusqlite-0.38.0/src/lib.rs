@@ -1,6 +1,56 @@
 //! Rusqlite is an ergonomic wrapper for using SQLite from Rust.
-
-/*
+//!
+//! Historically, the API was based on the one from
+//! [`rust-postgres`](https://github.com/sfackler/rust-postgres). However, the
+//! two have diverged in many ways, and no compatibility between the two is
+//! intended.
+//!
+//! ```rust
+//! use rusqlite::{params, Connection, Result};
+//!
+//! #[derive(Debug)]
+//! struct Person {
+//!     id: i32,
+//!     name: String,
+//!     data: Option<Vec<u8>>,
+//! }
+//!
+//! fn main() -> Result<()> {
+//!     let conn = Connection::open_in_memory()?;
+//!
+//!     conn.execute(
+//!         "CREATE TABLE person (
+//!             id   INTEGER PRIMARY KEY,
+//!             name TEXT NOT NULL,
+//!             data BLOB
+//!         )",
+//!         (), // empty list of parameters.
+//!     )?;
+//!     let me = Person {
+//!         id: 0,
+//!         name: "Steven".to_string(),
+//!         data: None,
+//!     };
+//!     conn.execute(
+//!         "INSERT INTO person (name, data) VALUES (?1, ?2)",
+//!         (&me.name, &me.data),
+//!     )?;
+//!
+//!     let mut stmt = conn.prepare("SELECT id, name, data FROM person")?;
+//!     let person_iter = stmt.query_map([], |row| {
+//!         Ok(Person {
+//!             id: row.get(0)?,
+//!             name: row.get(1)?,
+//!             data: row.get(2)?,
+//!         })
+//!     })?;
+//!
+//!     for person in person_iter {
+//!         println!("Found person {:?}", person?);
+//!     }
+//!     Ok(())
+//! }
+//! ```
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -1235,641 +1285,1048 @@ impl InterruptHandle {
         }
     }
 }
-*/
-pub mod cell
-{
-    pub use std::cell::{ * };
-}
 
-pub mod database
-{
-    use crate::
-    {
-        *,
-    };
+#[cfg(doctest)]
+doc_comment::doctest!("../README.md");
 
-    pub struct Database
-    {
+#[cfg(test)]
+mod test {
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
+    use super::*;
+    use fallible_iterator::FallibleIterator;
+    use std::error::Error as StdError;
+    use std::fmt;
+
+    // this function is never called, but is still type checked; in
+    // particular, calls with specific instantiations will require
+    // that those types are `Send`.
+    #[allow(dead_code)]
+    #[expect(unconditional_recursion, clippy::extra_unused_type_parameters)]
+    fn ensure_send<T: Send>() {
+        ensure_send::<Connection>();
+        ensure_send::<InterruptHandle>();
     }
 
-    impl Database
-    {
-
-    }
-}
-
-pub mod connection
-{
-    use crate::
-    {
-        cell::{ RefCell },
-        database::{ Database },
-        sync::{Arc, Mutex},
-        *,
-    };
-
-    pub struct InnerConnection
-    {
-        pub db: *mut Database,
-        interrupt_lock: Arc<Mutex<*mut Database>>,
-        pub commit_hook: Option<Box<dyn FnMut() -> bool + Send>>,
-        pub rollback_hook: Option<Box<dyn FnMut() + Send>>,
-        pub update_hook: Option<Box<dyn FnMut(crate::hooks::Action, &str, &str, i64) + Send>>,
-        pub progress_handler: Option<Box<dyn FnMut() -> bool + Send>>,
-        pub authorizer: Option<crate::hooks::BoxedAuthorizer>,
-        pub preupdate_hook: Option<Box<dyn FnMut(crate::hooks::Action, &str, &str, &crate::hooks::PreUpdateCase) + Send>,>,
-        owned: bool,
+    #[allow(dead_code)]
+    #[expect(unconditional_recursion, clippy::extra_unused_type_parameters)]
+    fn ensure_sync<T: Sync>() {
+        ensure_sync::<InterruptHandle>();
     }
 
-    pub struct Connection
-    {
-        db: RefCell<InnerConnection>,
-        cache: StatementCache,
-        transaction_behavior: TransactionBehavior,
+    fn checked_memory_handle() -> Connection {
+        Connection::open_in_memory().unwrap()
     }
-}
 
-pub mod hooks
-{
-    use crate::
-    {
-        *,
-    };
-}
+    #[cfg_attr(
+        all(target_family = "wasm", target_os = "unknown"),
+        ignore = "no filesystem on this platform"
+    )]
+    #[test]
+    fn test_concurrent_transactions_busy_commit() -> Result<()> {
+        use std::time::Duration;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("transactions.db3");
 
-pub mod statement
-{
-    use std::cell::RefCell;
-    use std::sync::Arc;
-    use crate::
-    {
-        *,
-    };
+        Connection::open(&path)?.execute_batch(
+            "
+            BEGIN; CREATE TABLE foo(x INTEGER);
+            INSERT INTO foo VALUES(42); END;",
+        )?;
 
-    /// Prepared statements LRU cache.
-    #[derive(Debug)]
-    pub struct StatementCache(RefCell<LruCache<Arc<str>, RawStatement>>);
+        let mut db1 = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let mut db2 = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
 
-    unsafe impl Send for StatementCache {}
+        db1.busy_timeout(Duration::from_millis(0))?;
+        db2.busy_timeout(Duration::from_millis(0))?;
 
-    pub mod raw
-    {
-        use crate::
         {
-            *,
+            let tx1 = db1.transaction()?;
+            let tx2 = db2.transaction()?;
+
+            // SELECT first makes sqlite lock with a shared lock
+            tx1.query_row("SELECT x FROM foo LIMIT 1", [], |_| Ok(()))?;
+            tx2.query_row("SELECT x FROM foo LIMIT 1", [], |_| Ok(()))?;
+
+            tx1.execute("INSERT INTO foo VALUES(?1)", [1])?;
+            let _ = tx2.execute("INSERT INTO foo VALUES(?1)", [2]);
+
+            let _ = tx1.commit();
+            let _ = tx2.commit();
+        }
+
+        let _ = db1
+            .transaction()
+            .expect("commit should have closed transaction");
+        let _ = db2
+            .transaction()
+            .expect("commit should have closed transaction");
+        Ok(())
+    }
+
+    #[cfg_attr(
+        all(target_family = "wasm", target_os = "unknown"),
+        ignore = "no filesystem on this platform"
+    )]
+    #[test]
+    fn test_persistence() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("test.db3");
+
+        {
+            let db = Connection::open(&path)?;
+            let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(42);
+                   END;";
+            db.execute_batch(sql)?;
+        }
+
+        let path_string = path.to_str().unwrap();
+        let db = Connection::open(path_string)?;
+
+        assert_eq!(42, db.one_column::<i64, _>("SELECT x FROM foo", [])?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_open() {
+        Connection::open_in_memory().unwrap();
+
+        let db = checked_memory_handle();
+        db.close().unwrap();
+    }
+
+    #[cfg_attr(
+        all(target_family = "wasm", target_os = "unknown"),
+        ignore = "no filesystem on this platform"
+    )]
+    #[test]
+    fn test_path() -> Result<()> {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Connection::open("")?;
+        assert_eq!(Some(""), db.path());
+        let db = Connection::open_in_memory()?;
+        assert_eq!(Some(""), db.path());
+        let db = Connection::open("file:dummy.db?mode=memory&cache=shared")?;
+        assert_eq!(Some(""), db.path());
+        let path = tmp.path().join("file.db");
+        let db = Connection::open(path)?;
+        assert!(db.path().is_some_and(|p| p.ends_with("file.db")));
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_failure() {
+        let filename = "no_such_file.db";
+        let result = Connection::open_with_flags(filename, OpenFlags::SQLITE_OPEN_READ_ONLY);
+        let err = result.unwrap_err();
+        if let Error::SqliteFailure(e, Some(msg)) = err {
+            assert_eq!(ErrorCode::CannotOpen, e.code);
+            assert_eq!(ffi::SQLITE_CANTOPEN, e.extended_code);
+            assert!(
+                msg.contains(filename),
+                "error message '{msg}' does not contain '{filename}'"
+            );
+        } else {
+            panic!("SqliteFailure expected");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_invalid_unicode_file_names() -> Result<()> {
+        use std::ffi::OsStr;
+        use std::fs::File;
+        use std::os::unix::ffi::OsStrExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let path = temp_dir.path();
+        if File::create(path.join(OsStr::from_bytes(&[0xFE]))).is_err() {
+            // Skip test, filesystem doesn't support invalid Unicode
+            return Ok(());
+        }
+        let db_path = path.join(OsStr::from_bytes(&[0xFF]));
+        {
+            let db = Connection::open(&db_path)?;
+            let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(42);
+                   END;";
+            db.execute_batch(sql)?;
+        }
+
+        let db = Connection::open(&db_path)?;
+
+        assert_eq!(42, db.one_column::<i64, _>("SELECT x FROM foo", [])?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_close_retry() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+
+        // force the DB to be busy by preparing a statement; this must be done at the
+        // FFI level to allow us to call .close() without dropping the prepared
+        // statement first.
+        let raw_stmt = {
+            use super::str_to_cstring;
+            use std::ffi::c_int;
+            use std::ptr;
+
+            let raw_db = db.db.borrow_mut().db;
+            let sql = "SELECT 1";
+            let mut raw_stmt: *mut ffi::sqlite3_stmt = ptr::null_mut();
+            let cstring = str_to_cstring(sql)?;
+            let rc = unsafe {
+                ffi::sqlite3_prepare_v2(
+                    raw_db,
+                    cstring.as_ptr(),
+                    (sql.len() + 1) as c_int,
+                    &mut raw_stmt,
+                    ptr::null_mut(),
+                )
+            };
+            assert_eq!(rc, ffi::SQLITE_OK);
+            raw_stmt
         };
-    }
-}
 
-pub mod hash
-{
-    pub use std::hash::{ * };
-    /*
-    hashlink v0.12.1
-    hashbrown v0.15.5
-    foldhash v0.2.0 */
-    #[inline(always)]
-    const fn folded_multiply(x: u64, y: u64) -> u64 {
-        // The following code path is only fast if 64-bit to 128-bit widening
-        // multiplication is supported by the architecture. Most 64-bit
-        // architectures except SPARC64 and Wasm64 support it. However, the target
-        // pointer width doesn't always indicate that we are dealing with a 64-bit
-        // architecture, as there are ABIs that reduce the pointer width, especially
-        // on AArch64 and x86-64. WebAssembly (regardless of pointer width) supports
-        // 64-bit to 128-bit widening multiplication with the `wide-arithmetic`
-        // proposal.
-        #[cfg(any(
-            all(
-                target_pointer_width = "64",
-                not(any(target_arch = "sparc64", target_arch = "wasm64")),
-            ),
-            target_arch = "aarch64",
-            target_arch = "x86_64",
-            all(target_family = "wasm", target_feature = "wide-arithmetic"),
-        ))]
+        // now that we have an open statement, trying (and retrying) to close should
+        // fail.
+        let (db, _) = db.close().unwrap_err();
+        let (db, _) = db.close().unwrap_err();
+        let (db, _) = db.close().unwrap_err();
+
+        // finalize the open statement so a final close will succeed
+        assert_eq!(ffi::SQLITE_OK, unsafe { ffi::sqlite3_finalize(raw_stmt) });
+
+        db.close().unwrap();
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_with_flags() {
+        for bad_flags in &[
+            OpenFlags::empty(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_READ_WRITE,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_CREATE,
+        ] {
+            Connection::open_in_memory_with_flags(*bad_flags).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_execute_batch() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(1);
+                   INSERT INTO foo VALUES(2);
+                   INSERT INTO foo VALUES(3);
+                   INSERT INTO foo VALUES(4);
+                   END;";
+        db.execute_batch(sql)?;
+
+        db.execute_batch("UPDATE foo SET x = 3 WHERE x < 3")?;
+
+        db.execute_batch("INVALID SQL").unwrap_err();
+
+        db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER)")?;
+
+        assert_eq!(1, db.execute("INSERT INTO foo(x) VALUES (?1)", [1i32])?);
+        assert_eq!(1, db.execute("INSERT INTO foo(x) VALUES (?1)", [2i32])?);
+
+        assert_eq!(3, db.one_column::<i32, _>("SELECT SUM(x) FROM foo", [])?);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "extra_check")]
+    fn test_execute_select_with_no_row() {
+        let db = checked_memory_handle();
+        let err = db.execute("SELECT 1 WHERE 1 < ?1", [1i32]).unwrap_err();
+        assert_eq!(
+            err,
+            Error::ExecuteReturnedResults,
+            "Unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_execute_select_with_row() {
+        let db = checked_memory_handle();
+        let err = db.execute("SELECT 1", []).unwrap_err();
+        assert_eq!(err, Error::ExecuteReturnedResults);
+    }
+
+    #[test]
+    fn test_execute_multiple() {
+        let db = checked_memory_handle();
+        let err = db
+            .execute(
+                "CREATE TABLE foo(x INTEGER); CREATE TABLE foo(x INTEGER)",
+                [],
+            )
+            .unwrap_err();
+        match err {
+            Error::MultipleStatement => (),
+            _ => panic!("Unexpected error: {err}"),
+        }
+        db.execute("CREATE TABLE t(c); -- bim", [])
+            .expect("Tail comment should be ignored");
+    }
+
+    #[test]
+    fn test_prepare_column_names() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let stmt = db.prepare("SELECT * FROM foo")?;
+        assert_eq!(stmt.column_count(), 1);
+        assert_eq!(stmt.column_names(), vec!["x"]);
+
+        let stmt = db.prepare("SELECT x AS a, x AS b FROM foo")?;
+        assert_eq!(stmt.column_count(), 2);
+        assert_eq!(stmt.column_names(), vec!["a", "b"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_execute() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let mut insert_stmt = db.prepare("INSERT INTO foo(x) VALUES(?1)")?;
+        assert_eq!(insert_stmt.execute([1i32])?, 1);
+        assert_eq!(insert_stmt.execute([2i32])?, 1);
+        assert_eq!(insert_stmt.execute([3i32])?, 1);
+
+        assert_eq!(insert_stmt.execute(["hello"])?, 1);
+        assert_eq!(insert_stmt.execute(["goodbye"])?, 1);
+        assert_eq!(insert_stmt.execute([types::Null])?, 1);
+
+        let mut update_stmt = db.prepare("UPDATE foo SET x=?1 WHERE x<?2")?;
+        assert_eq!(update_stmt.execute([3i32, 3i32])?, 2);
+        assert_eq!(update_stmt.execute([3i32, 3i32])?, 0);
+        assert_eq!(update_stmt.execute([8i32, 8i32])?, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_query() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let mut insert_stmt = db.prepare("INSERT INTO foo(x) VALUES(?1)")?;
+        assert_eq!(insert_stmt.execute([1i32])?, 1);
+        assert_eq!(insert_stmt.execute([2i32])?, 1);
+        assert_eq!(insert_stmt.execute([3i32])?, 1);
+
+        let mut query = db.prepare("SELECT x FROM foo WHERE x < ?1 ORDER BY x DESC")?;
         {
-            // We compute the full u64 x u64 -> u128 product, this is a single mul
-            // instruction on x86-64, one mul plus one mulhi on ARM64.
-            let full = (x as u128).wrapping_mul(y as u128);
-            let lo = full as u64;
-            let hi = (full >> 64) as u64;
+            let mut rows = query.query([4i32])?;
+            let mut v = Vec::<i32>::new();
 
-            // The middle bits of the full product fluctuate the most with small
-            // changes in the input. This is the top bits of lo and the bottom bits
-            // of hi. We can thus make the entire output fluctuate with small
-            // changes to the input by XOR'ing these two halves.
-            lo ^ hi
+            while let Some(row) = rows.next()? {
+                v.push(row.get(0)?);
+            }
+
+            assert_eq!(v, [3i32, 2, 1]);
         }
 
-        #[cfg(not(any(
-            all(
-                target_pointer_width = "64",
-                not(any(target_arch = "sparc64", target_arch = "wasm64")),
-            ),
-            target_arch = "aarch64",
-            target_arch = "x86_64",
-            all(target_family = "wasm", target_feature = "wide-arithmetic"),
-        )))]
         {
-            // u64 x u64 -> u128 product is quite expensive on 32-bit.
-            // We approximate it by expanding the multiplication and eliminating
-            // carries by replacing additions with XORs:
-            //    (2^32 hx + lx)*(2^32 hy + ly) =
-            //    2^64 hx*hy + 2^32 (hx*ly + lx*hy) + lx*ly ~=
-            //    2^64 hx*hy ^ 2^32 (hx*ly ^ lx*hy) ^ lx*ly
-            // Which when folded becomes:
-            //    (hx*hy ^ lx*ly) ^ (hx*ly ^ lx*hy).rotate_right(32)
+            let mut rows = query.query([3i32])?;
+            let mut v = Vec::<i32>::new();
 
-            let lx = x as u32;
-            let ly = y as u32;
-            let hx = (x >> 32) as u32;
-            let hy = (y >> 32) as u32;
+            while let Some(row) = rows.next()? {
+                v.push(row.get(0)?);
+            }
 
-            let ll = (lx as u64).wrapping_mul(ly as u64);
-            let lh = (lx as u64).wrapping_mul(hy as u64);
-            let hl = (hx as u64).wrapping_mul(ly as u64);
-            let hh = (hx as u64).wrapping_mul(hy as u64);
-
-            (hh ^ ll) ^ (hl ^ lh).rotate_right(32)
+            assert_eq!(v, [2i32, 1]);
         }
+        Ok(())
     }
 
-    #[inline(always)]
-    const fn rotate_right(x: u64, r: u32) -> u64 {
-        #[cfg(any(
-            target_pointer_width = "64",
-            target_arch = "aarch64",
-            target_arch = "x86_64",
-            target_family = "wasm",
-        ))]
+    #[test]
+    fn test_query_map() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER, y TEXT);
+                   INSERT INTO foo VALUES(4, \"hello\");
+                   INSERT INTO foo VALUES(3, \", \");
+                   INSERT INTO foo VALUES(2, \"world\");
+                   INSERT INTO foo VALUES(1, \"!\");
+                   END;";
+        db.execute_batch(sql)?;
+
+        let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+        let results: Result<Vec<String>> = query.query([])?.map(|row| row.get(1)).collect();
+
+        assert_eq!(results?.concat(), "hello, world!");
+        Ok(())
+    }
+
+    #[test]
+    fn test_query_row() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                   CREATE TABLE foo(x INTEGER);
+                   INSERT INTO foo VALUES(1);
+                   INSERT INTO foo VALUES(2);
+                   INSERT INTO foo VALUES(3);
+                   INSERT INTO foo VALUES(4);
+                   END;";
+        db.execute_batch(sql)?;
+
+        assert_eq!(10, db.one_column::<i64, _>("SELECT SUM(x) FROM foo", [])?);
+
+        let result: Result<i64> = db.one_column("SELECT x FROM foo WHERE x > 5", []);
+        match result.unwrap_err() {
+            Error::QueryReturnedNoRows => (),
+            err => panic!("Unexpected error {err}"),
+        }
+
+        db.query_row("NOT A PROPER QUERY; test123", [], |_| Ok(()))
+            .unwrap_err();
+
+        db.query_row("SELECT 1; SELECT 2;", [], |_| Ok(()))
+            .unwrap_err();
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_optional() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+
+        let result: Result<i64> = db.one_column("SELECT 1 WHERE 0 <> 0", []);
+        let result = result.optional();
+        match result? {
+            None => (),
+            _ => panic!("Unexpected result"),
+        }
+
+        let result: Result<i64> = db.one_column("SELECT 1 WHERE 0 == 0", []);
+        let result = result.optional();
+        match result? {
+            Some(1) => (),
+            _ => panic!("Unexpected result"),
+        }
+
+        let bad_query_result: Result<i64> = db.one_column("NOT A PROPER QUERY", []);
+        let bad_query_result = bad_query_result.optional();
+        bad_query_result.unwrap_err();
+        Ok(())
+    }
+
+    #[test]
+    fn test_pragma_query_row() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert_eq!(
+            "memory",
+            db.one_column::<String, _>("PRAGMA journal_mode", [])?
+        );
+        let mode = db.one_column::<String, _>("PRAGMA journal_mode=off", [])?;
+        if cfg!(feature = "bundled") {
+            assert_eq!(mode, "off");
+        } else {
+            // Note: system SQLite on macOS defaults to "off" rather than
+            // "memory" for the journal mode (which cannot be changed for
+            // in-memory connections). This seems like it's *probably* legal
+            // according to the docs below, so we relax this test when not
+            // bundling:
+            //
+            // From https://www.sqlite.org/pragma.html#pragma_journal_mode
+            // > Note that the journal_mode for an in-memory database is either
+            // > MEMORY or OFF and can not be changed to a different value. An
+            // > attempt to change the journal_mode of an in-memory database to
+            // > any setting other than MEMORY or OFF is ignored.
+            assert!(mode == "memory" || mode == "off", "Got mode {mode:?}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_failures() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+
+        let err = db.prepare("SELECT * FROM does_not_exist").unwrap_err();
+        assert!(format!("{err}").contains("does_not_exist"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_last_insert_rowid() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER PRIMARY KEY)")?;
+        db.execute_batch("INSERT INTO foo DEFAULT VALUES")?;
+
+        assert_eq!(db.last_insert_rowid(), 1);
+
+        let mut stmt = db.prepare("INSERT INTO foo DEFAULT VALUES")?;
+        for _ in 0i32..9 {
+            stmt.execute([])?;
+        }
+        assert_eq!(db.last_insert_rowid(), 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_total_changes() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "CREATE TABLE foo(x INTEGER PRIMARY KEY, value TEXT default '' NOT NULL,
+                                    desc TEXT default '');
+                   CREATE VIEW foo_bar AS SELECT x, desc FROM foo WHERE value = 'bar';
+                   CREATE TRIGGER INSERT_FOOBAR
+                   INSTEAD OF INSERT
+                   ON foo_bar
+                   BEGIN
+                       INSERT INTO foo VALUES(new.x, 'bar', new.desc);
+                   END;";
+        db.execute_batch(sql)?;
+        let total_changes_before = db.total_changes();
+        let changes = db
+            .prepare("INSERT INTO foo_bar VALUES(null, 'baz');")?
+            .execute([])?;
+        let total_changes_after = db.total_changes();
+        assert_eq!(changes, 0);
+        assert_eq!(total_changes_after - total_changes_before, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_autocommit() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(
+            db.is_autocommit(),
+            "autocommit expected to be active by default"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_busy() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(!db.is_busy());
+        let mut stmt = db.prepare("PRAGMA schema_version")?;
+        assert!(!db.is_busy());
         {
-            x.rotate_right(r)
+            let mut rows = stmt.query([])?;
+            assert!(!db.is_busy());
+            let row = rows.next()?;
+            assert!(db.is_busy());
+            assert!(row.is_some());
+        }
+        assert!(!db.is_busy());
+        Ok(())
+    }
+
+    #[test]
+    fn test_statement_debugging() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let query = "SELECT 12345";
+        let stmt = db.prepare(query)?;
+
+        assert!(format!("{stmt:?}").contains(query));
+        Ok(())
+    }
+
+    #[test]
+    fn test_notnull_constraint_error() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x NOT NULL)")?;
+
+        let result = db.execute("INSERT INTO foo (x) VALUES (NULL)", []);
+
+        match result.unwrap_err() {
+            Error::SqliteFailure(err, _) => {
+                assert_eq!(err.code, ErrorCode::ConstraintViolation);
+                assert_eq!(err.extended_code, ffi::SQLITE_CONSTRAINT_NOTNULL);
+            }
+            err => panic!("Unexpected error {err}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_version_string() {
+        let n = version_number();
+        let major = n / 1_000_000;
+        let minor = (n % 1_000_000) / 1_000;
+        let patch = n % 1_000;
+
+        assert!(version().contains(&format!("{major}.{minor}.{patch}")));
+    }
+
+    #[test]
+    #[cfg(feature = "functions")]
+    fn test_interrupt() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+
+        let interrupt_handle = db.get_interrupt_handle();
+
+        db.create_scalar_function(
+            "interrupt",
+            0,
+            functions::FunctionFlags::default(),
+            move |_| {
+                interrupt_handle.interrupt();
+                Ok(0)
+            },
+        )?;
+
+        let mut stmt =
+            db.prepare("SELECT interrupt() FROM (SELECT 1 UNION SELECT 2 UNION SELECT 3)")?;
+
+        let result: Result<Vec<i32>> = stmt.query([])?.map(|r| r.get(0)).collect();
+
+        assert_eq!(
+            result.unwrap_err().sqlite_error_code(),
+            Some(ErrorCode::OperationInterrupted)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_interrupt_close() {
+        let db = checked_memory_handle();
+        let handle = db.get_interrupt_handle();
+        handle.interrupt();
+        db.close().unwrap();
+        handle.interrupt();
+
+        // Look at its internals to see if we cleared it out properly.
+        let db_guard = handle.db_lock.lock().unwrap();
+        assert!(db_guard.is_null());
+        // It would be nice to test that we properly handle close/interrupt
+        // running at the same time, but it seems impossible to do with any
+        // degree of reliability.
+    }
+
+    #[test]
+    fn test_get_raw() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(i, x);")?;
+        let vals = ["foobar", "1234", "qwerty"];
+        let mut insert_stmt = db.prepare("INSERT INTO foo(i, x) VALUES(?1, ?2)")?;
+        for (i, v) in vals.iter().enumerate() {
+            let i_to_insert = i as i64;
+            assert_eq!(insert_stmt.execute(params![i_to_insert, v])?, 1);
         }
 
-        #[cfg(not(any(
-            target_pointer_width = "64",
-            target_arch = "aarch64",
-            target_arch = "x86_64",
-            target_family = "wasm",
-        )))]
+        let mut query = db.prepare("SELECT i, x FROM foo")?;
+        let mut rows = query.query([])?;
+
+        while let Some(row) = rows.next()? {
+            let i = row.get_ref(0)?.as_i64()?;
+            let expect = vals[i as usize];
+            let x = row.get_ref("x")?.as_str()?;
+            assert_eq!(x, expect);
+        }
+
+        let mut query = db.prepare("SELECT x FROM foo")?;
+        let rows = query.query_map([], |row| {
+            let x = row.get_ref(0)?.as_str()?; // check From<FromSqlError> for Error
+            Ok(x[..].to_owned())
+        })?;
+
+        for (i, row) in rows.enumerate() {
+            assert_eq!(row?, vals[i]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_handle() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let handle = unsafe { db.handle() };
         {
-            // On platforms without 64-bit arithmetic rotation can be slow, rotate
-            // each 32-bit half independently.
-            let lo = (x as u32).rotate_right(r);
-            let hi = ((x >> 32) as u32).rotate_right(r);
-            ((hi as u64) << 32) | lo as u64
+            let db = unsafe { Connection::from_handle(handle) }?;
+            db.execute_batch("PRAGMA VACUUM")?;
         }
+        db.close().unwrap();
+        Ok(())
     }
 
-    #[cold]
-    fn cold_path() {}
-
-    /// Hashes strings <= 16 bytes, has unspecified behavior when bytes.len() > 16.
-    #[inline(always)]
-    fn hash_bytes_short(bytes: &[u8], accumulator: u64, seeds: &[u64; 6]) -> u64 {
-        let len = bytes.len();
-        let mut s0 = accumulator;
-        let mut s1 = seeds[1];
-        // XOR the input into s0, s1, then multiply and fold.
-        if len >= 8 {
-            s0 ^= u64::from_ne_bytes(bytes[0..8].try_into().unwrap());
-            s1 ^= u64::from_ne_bytes(bytes[len - 8..].try_into().unwrap());
-        } else if len >= 4 {
-            s0 ^= u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as u64;
-            s1 ^= u32::from_ne_bytes(bytes[len - 4..].try_into().unwrap()) as u64;
-        } else if len > 0 {
-            let lo = bytes[0];
-            let mid = bytes[len / 2];
-            let hi = bytes[len - 1];
-            s0 ^= lo as u64;
-            s1 ^= ((hi as u64) << 8) | mid as u64;
-        }
-        folded_multiply(s0, s1)
+    #[test]
+    fn test_from_handle_owned() -> Result<()> {
+        let mut handle: *mut ffi::sqlite3 = std::ptr::null_mut();
+        let r = unsafe { ffi::sqlite3_open(c":memory:".as_ptr(), &mut handle) };
+        assert_eq!(r, ffi::SQLITE_OK);
+        let db = unsafe { Connection::from_handle_owned(handle) }?;
+        db.execute_batch("PRAGMA VACUUM")?;
+        Ok(())
     }
 
-    /// Load 8 bytes into a u64 word at the given offset.
-    ///
-    /// # Safety
-    /// You must ensure that offset + 8 <= bytes.len().
-    #[inline(always)]
-    unsafe fn load(bytes: &[u8], offset: usize) -> u64 {
-        unsafe { bytes.as_ptr().add(offset).cast::<u64>().read_unaligned() }
-    }
+    mod query_and_then_tests {
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// Hashes strings > 16 bytes.
-    ///
-    /// # Safety
-    /// v.len() must be > 16 bytes.
-    #[cold]
-    #[inline(never)]
-    unsafe fn hash_bytes_long(mut v: &[u8], accumulator: u64, seeds: &[u64; 6]) -> u64 {
-        let mut s0 = accumulator;
-        let mut s1 = s0.wrapping_add(seeds[1]);
+        use super::*;
 
-        if v.len() > 128 {
-            cold_path();
-            let mut s2 = s0.wrapping_add(seeds[2]);
-            let mut s3 = s0.wrapping_add(seeds[3]);
-
-            if v.len() > 256 {
-                cold_path();
-                let mut s4 = s0.wrapping_add(seeds[4]);
-                let mut s5 = s0.wrapping_add(seeds[5]);
-                loop {
-                    unsafe {
-                        // SAFETY: we checked the length is > 256, we index at most v[..96].
-                        s0 = folded_multiply(load(v, 0) ^ s0, load(v, 48) ^ seeds[0]);
-                        s1 = folded_multiply(load(v, 8) ^ s1, load(v, 56) ^ seeds[0]);
-                        s2 = folded_multiply(load(v, 16) ^ s2, load(v, 64) ^ seeds[0]);
-                        s3 = folded_multiply(load(v, 24) ^ s3, load(v, 72) ^ seeds[0]);
-                        s4 = folded_multiply(load(v, 32) ^ s4, load(v, 80) ^ seeds[0]);
-                        s5 = folded_multiply(load(v, 40) ^ s5, load(v, 88) ^ seeds[0]);
-                    }
-                    v = &v[96..];
-                    if v.len() <= 256 {
-                        break;
-                    }
-                }
-                s0 ^= s4;
-                s1 ^= s5;
-            }
-
-            loop {
-                unsafe {
-                    s0 = folded_multiply(load(v, 0) ^ s0, load(v, 32) ^ seeds[0]);
-                    s1 = folded_multiply(load(v, 8) ^ s1, load(v, 40) ^ seeds[0]);
-                    s2 = folded_multiply(load(v, 16) ^ s2, load(v, 48) ^ seeds[0]);
-                    s3 = folded_multiply(load(v, 24) ^ s3, load(v, 56) ^ seeds[0]);
-                }
-                v = &v[64..];
-                if v.len() <= 128 {
-                    break;
-                }
-            }
-            s0 ^= s2;
-            s1 ^= s3;
+        #[derive(Debug)]
+        enum CustomError {
+            SomeError,
+            Sqlite(Error),
         }
 
-        let len = v.len();
-
-        unsafe
-        {
-            s0 = folded_multiply(load(v, 0) ^ s0, load(v, len - 16) ^ seeds[0]);
-            s1 = folded_multiply(load(v, 8) ^ s1, load(v, len - 8) ^ seeds[0]);
-            if len >= 32 {
-                s0 = folded_multiply(load(v, 16) ^ s0, load(v, len - 32) ^ seeds[0]);
-                s1 = folded_multiply(load(v, 24) ^ s1, load(v, len - 24) ^ seeds[0]);
-                if len >= 64 {
-                    s0 = folded_multiply(load(v, 32) ^ s0, load(v, len - 48) ^ seeds[0]);
-                    s1 = folded_multiply(load(v, 40) ^ s1, load(v, len - 40) ^ seeds[0]);
-                    if len >= 96 {
-                        s0 = folded_multiply(load(v, 48) ^ s0, load(v, len - 64) ^ seeds[0]);
-                        s1 = folded_multiply(load(v, 56) ^ s1, load(v, len - 56) ^ seeds[0]);
-                    }
+        impl fmt::Display for CustomError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+                match *self {
+                    Self::SomeError => write!(f, "my custom error"),
+                    Self::Sqlite(ref se) => write!(f, "my custom error: {se}"),
                 }
             }
         }
 
-        s0 ^ s1
-    }
-    /// A random seed intended to be shared by many different foldhash instances.
-    #[derive(Clone, Debug)]
-    pub struct SharedSeed
-    {
-        pub seeds: [u64; 6],
-    }
-    /*
-    hashbrown::DefaultHashBuilder::FoldHasher */
-    /// A [`Hasher`] instance implementing foldhash, optimized for speed.
-    pub struct DefaultHasher<'a>
-    {
-        accumulator: u64,
-        sponge: u128,
-        sponge_len: u8,
-        seeds: &'a [u64; 6],
-    }
-
-    impl<'a> DefaultHasher<'a>
-    {
-        /// Initializes this [`FoldHasher`] with the given per-hasher seed and [`SharedSeed`].
-        #[inline] pub const fn with_seed(per_hasher_seed: u64, shared_seed: &'a SharedSeed) -> DefaultHasher<'a>
-        {
-            DefaultHasher
-            {
-                accumulator: per_hasher_seed,
-                sponge: 0,
-                sponge_len: 0,
-                seeds: &shared_seed.seeds,
+        impl StdError for CustomError {
+            fn description(&self) -> &str {
+                "my custom error"
             }
-        }
 
-        #[inline(always)]
-        fn write_num<T: Into<u128>>(&mut self, x: T) {
-            let bits: usize = 8 * core::mem::size_of::<T>();
-            if self.sponge_len as usize + bits > 128 {
-                let lo = self.sponge as u64;
-                let hi = (self.sponge >> 64) as u64;
-                self.accumulator = folded_multiply(lo ^ self.accumulator, hi ^ self.seeds[0]);
-                self.sponge = x.into();
-                self.sponge_len = bits as u8;
-            } else {
-                self.sponge |= x.into() << self.sponge_len;
-                self.sponge_len += bits as u8;
-            }
-        }
-    }
-
-    impl<'a> Hasher for DefaultHasher<'a> {
-        #[inline(always)]
-        fn write(&mut self, bytes: &[u8]) {
-            // We perform overlapping reads in the byte hash which could lead to
-            // trivial length-extension attacks. These should be defeated by
-            // adding a length-dependent rotation on our unpredictable seed
-            // which costs only a single cycle (or none if executed with
-            // instruction-level parallelism).
-            let len = bytes.len();
-            self.accumulator = rotate_right(self.accumulator, len as u32);
-            if len <= 16 {
-                self.accumulator = hash_bytes_short(bytes, self.accumulator, self.seeds);
-            } else {
-                unsafe {
-                    // SAFETY: we checked that the length is > 16 bytes.
-                    self.accumulator = hash_bytes_long(bytes, self.accumulator, self.seeds);
+            fn cause(&self) -> Option<&dyn StdError> {
+                match *self {
+                    Self::SomeError => None,
+                    Self::Sqlite(ref se) => Some(se),
                 }
             }
         }
 
-        #[inline(always)]
-        fn write_u8(&mut self, i: u8) {
-            self.write_num(i);
-        }
-
-        #[inline(always)]
-        fn write_u16(&mut self, i: u16) {
-            self.write_num(i);
-        }
-
-        #[inline(always)]
-        fn write_u32(&mut self, i: u32) {
-            self.write_num(i);
-        }
-
-        #[inline(always)]
-        fn write_u64(&mut self, i: u64) {
-            self.write_num(i);
-        }
-
-        #[inline(always)]
-        fn write_u128(&mut self, i: u128) {
-            let lo = i as u64;
-            let hi = (i >> 64) as u64;
-            self.accumulator = folded_multiply(lo ^ self.accumulator, hi ^ self.seeds[0]);
-        }
-
-        #[inline(always)]
-        fn write_usize(&mut self, i: usize) {
-            // u128 doesn't implement From<usize>.
-            #[cfg(target_pointer_width = "32")]
-            self.write_num(i as u32);
-            #[cfg(target_pointer_width = "64")]
-            self.write_num(i as u64);
-        }
-
-        #[cfg(feature = "nightly")]
-        #[inline(always)]
-        fn write_str(&mut self, s: &str) {
-            // Our write function already handles length differences.
-            self.write(s.as_bytes())
-        }
-
-        #[inline(always)]
-        fn finish(&self) -> u64 {
-            if self.sponge_len > 0 {
-                let lo = self.sponge as u64;
-                let hi = (self.sponge >> 64) as u64;
-                folded_multiply(lo ^ self.accumulator, hi ^ self.seeds[0])
-            } else {
-                self.accumulator
-            }
-        }
-    }
-
-    /// An object representing an initialized global seed.
-    ///
-    /// Does not actually store the seed inside itself, it is a zero-sized type.
-    /// This prevents inflating the RandomState size and in turn HashMap's size.
-    #[derive(Copy, Clone, Debug)]
-    pub struct GlobalSeed {
-        // So we can't accidentally type GlobalSeed { } within this crate.
-        _no_accidental_unsafe_init: (),
-    }
-
-    impl GlobalSeed {
-        #[inline(always)]
-        pub fn new() -> Self {
-            if GLOBAL_SEED_STORAGE.state.load(Ordering::Acquire) != INIT {
-                Self::init_slow()
-            }
-            Self {
-                _no_accidental_unsafe_init: (),
+        impl From<Error> for CustomError {
+            fn from(se: Error) -> Self {
+                Self::Sqlite(se)
             }
         }
 
-        #[cold]
-        #[inline(never)]
-        fn init_slow() {
-            // Generate seed outside of critical section.
-            let seed = generate_global_seed();
+        type CustomResult<T> = Result<T, CustomError>;
 
-            loop {
-                match GLOBAL_SEED_STORAGE.state.compare_exchange_weak(
-                    UNINIT,
-                    LOCKED,
-                    Ordering::Acquire,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => unsafe {
-                        // SAFETY: we just acquired an exclusive lock.
-                        *GLOBAL_SEED_STORAGE.seed.get() = seed;
-                        GLOBAL_SEED_STORAGE.state.store(INIT, Ordering::Release);
-                        return;
-                    },
+        #[test]
+        fn test_query_and_then() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
 
-                    Err(INIT) => return,
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let results: Result<Vec<String>> =
+                query.query_and_then([], |row| row.get(1))?.collect();
 
-                    // Yes, it's a spin loop. We need to support no_std (so no easy
-                    // access to proper locks), this is a one-time-per-program
-                    // initialization, and the critical section is only a few
-                    // store instructions, so it'll be fine.
-                    _ => core::hint::spin_loop(),
-                }
+            assert_eq!(results?.concat(), "hello, world!");
+            Ok(())
+        }
+
+        #[test]
+        fn test_query_and_then_fails() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
+
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let bad_type: Result<Vec<f64>> = query.query_and_then([], |row| row.get(1))?.collect();
+
+            match bad_type.unwrap_err() {
+                Error::InvalidColumnType(..) => (),
+                err => panic!("Unexpected error {err}"),
             }
-        }
 
-        #[inline(always)]
-        pub fn get(self) -> &'static SharedSeed {
-            // SAFETY: our constructor ensured we are in the INIT state and thus
-            // this raw read does not race with any write.
-            unsafe { &*GLOBAL_SEED_STORAGE.seed.get() }
-        }
-    }
-}
+            let bad_idx: Result<Vec<String>> =
+                query.query_and_then([], |row| row.get(3))?.collect();
 
-    /// A [`BuildHasher`] for [`fast::FoldHasher`](FoldHasher) that is randomly initialized.
-    #[derive(Clone, Debug)]
-    pub struct RandomState {
-        per_hasher_seed: u64,
-        global_seed: GlobalSeed,
-    }
-
-    impl Default for RandomState {
-        #[inline(always)]
-        fn default() -> Self {
-            Self {
-                per_hasher_seed: gen_per_hasher_seed(),
-                global_seed: GlobalSeed::new(),
+            match bad_idx.unwrap_err() {
+                Error::InvalidColumnIndex(_) => (),
+                err => panic!("Unexpected error {err}"),
             }
+            Ok(())
         }
-    }
 
-    impl BuildHasher for RandomState {
-        type Hasher = FoldHasher<'static>;
+        #[test]
+        fn test_query_and_then_custom_error() -> CustomResult<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
 
-        #[inline(always)]
-        fn build_hasher(&self) -> FoldHasher<'static> {
-            FoldHasher::with_seed(self.per_hasher_seed, self.global_seed.get())
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let results: CustomResult<Vec<String>> = query
+                .query_and_then([], |row| row.get(1).map_err(CustomError::Sqlite))?
+                .collect();
+
+            assert_eq!(results?.concat(), "hello, world!");
+            Ok(())
         }
-    }
 
-    /// A [`BuildHasher`] for [`fast::FoldHasher`](FoldHasher) that is randomly
-    /// initialized by default, but can also be initialized with a specific seed.
-    ///
-    /// This can be useful for e.g. testing, but the downside is that this type
-    /// has a size of 16 bytes rather than the 8 bytes [`RandomState`] is.
-    #[derive(Clone, Debug)]
-    pub struct SeedableRandomState {
-        per_hasher_seed: u64,
-        shared_seed: &'static SharedSeed,
-    }
+        #[test]
+        fn test_query_and_then_custom_error_fails() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       INSERT INTO foo VALUES(3, \", \");
+                       INSERT INTO foo VALUES(2, \"world\");
+                       INSERT INTO foo VALUES(1, \"!\");
+                       END;";
+            db.execute_batch(sql)?;
 
-    impl Default for SeedableRandomState {
-        #[inline(always)]
-        fn default() -> Self {
-            Self::random()
-        }
-    }
+            let mut query = db.prepare("SELECT x, y FROM foo ORDER BY x DESC")?;
+            let bad_type: CustomResult<Vec<f64>> = query
+                .query_and_then([], |row| row.get(1).map_err(CustomError::Sqlite))?
+                .collect();
 
-    impl SeedableRandomState {
-        /// Generates a random [`SeedableRandomState`], similar to [`RandomState`].
-        #[inline(always)]
-        pub fn random() -> Self {
-            Self {
-                per_hasher_seed: gen_per_hasher_seed(),
-                shared_seed: SharedSeed::global_random(),
+            match bad_type.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnType(..)) => (),
+                err => panic!("Unexpected error {err}"),
             }
-        }
 
-        /// Generates a fixed [`SeedableRandomState`], similar to [`FixedState`].
-        #[inline(always)]
-        pub fn fixed() -> Self {
-            Self {
-                per_hasher_seed: ARBITRARY3,
-                shared_seed: SharedSeed::global_fixed(),
+            let bad_idx: CustomResult<Vec<String>> = query
+                .query_and_then([], |row| row.get(3).map_err(CustomError::Sqlite))?
+                .collect();
+
+            match bad_idx.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnIndex(_)) => (),
+                err => panic!("Unexpected error {err}"),
             }
-        }
 
-        /// Generates a [`SeedableRandomState`] with the given per-hasher seed
-        /// and [`SharedSeed`].
-        #[inline(always)]
-        pub fn with_seed(per_hasher_seed: u64, shared_seed: &'static SharedSeed) -> Self {
-            // XOR with ARBITRARY3 such that with_seed(0) matches default.
-            Self {
-                per_hasher_seed: per_hasher_seed ^ ARBITRARY3,
-                shared_seed,
+            let non_sqlite_err: CustomResult<Vec<String>> = query
+                .query_and_then([], |_| Err(CustomError::SomeError))?
+                .collect();
+
+            match non_sqlite_err.unwrap_err() {
+                CustomError::SomeError => (),
+                err => panic!("Unexpected error {err}"),
             }
+            Ok(())
         }
-    }
 
-    impl BuildHasher for SeedableRandomState {
-        type Hasher = FoldHasher<'static>;
+        #[test]
+        fn test_query_row_and_then_custom_error() -> CustomResult<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       END;";
+            db.execute_batch(sql)?;
 
-        #[inline(always)]
-        fn build_hasher(&self) -> FoldHasher<'static> {
-            FoldHasher::with_seed(self.per_hasher_seed, self.shared_seed)
+            let query = "SELECT x, y FROM foo ORDER BY x DESC";
+            let results: CustomResult<String> =
+                db.query_row_and_then(query, [], |row| row.get(1).map_err(CustomError::Sqlite));
+
+            assert_eq!(results?, "hello");
+            Ok(())
         }
-    }
 
-    /// A [`BuildHasher`] for [`fast::FoldHasher`](FoldHasher) that always has the same fixed seed.
-    ///
-    /// Not recommended unless you absolutely need determinism.
-    #[derive(Clone, Debug)]
-    pub struct FixedState {
-        per_hasher_seed: u64,
-    }
+        #[test]
+        fn test_query_row_and_then_custom_error_fails() -> Result<()> {
+            let db = Connection::open_in_memory()?;
+            let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       END;";
+            db.execute_batch(sql)?;
 
-    impl FixedState {
-        /// Creates a [`FixedState`] with the given per-hasher-seed.
-        #[inline(always)]
-        pub const fn with_seed(per_hasher_seed: u64) -> Self {
-            // XOR with ARBITRARY3 such that with_seed(0) matches default.
-            Self {
-                per_hasher_seed: per_hasher_seed ^ ARBITRARY3,
+            let query = "SELECT x, y FROM foo ORDER BY x DESC";
+            let bad_type: CustomResult<f64> =
+                db.query_row_and_then(query, [], |row| row.get(1).map_err(CustomError::Sqlite));
+
+            match bad_type.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnType(..)) => (),
+                err => panic!("Unexpected error {err}"),
             }
-        }
-    }
 
-    impl Default for FixedState {
-        #[inline(always)]
-        fn default() -> Self {
-            Self {
-                per_hasher_seed: ARBITRARY3,
+            let bad_idx: CustomResult<String> =
+                db.query_row_and_then(query, [], |row| row.get(3).map_err(CustomError::Sqlite));
+
+            match bad_idx.unwrap_err() {
+                CustomError::Sqlite(Error::InvalidColumnIndex(_)) => (),
+                err => panic!("Unexpected error {err}"),
             }
+
+            let non_sqlite_err: CustomResult<String> =
+                db.query_row_and_then(query, [], |_| Err(CustomError::SomeError));
+
+            match non_sqlite_err.unwrap_err() {
+                CustomError::SomeError => (),
+                err => panic!("Unexpected error {err}"),
+            }
+            Ok(())
         }
     }
 
-    impl BuildHasher for FixedState {
-        type Hasher = FoldHasher<'static>;
+    #[test]
+    fn test_dynamic() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = "BEGIN;
+                       CREATE TABLE foo(x INTEGER, y TEXT);
+                       INSERT INTO foo VALUES(4, \"hello\");
+                       END;";
+        db.execute_batch(sql)?;
 
-        #[inline(always)]
-        fn build_hasher(&self) -> FoldHasher<'static> {
-            FoldHasher::with_seed(self.per_hasher_seed, SharedSeed::global_fixed())
+        db.query_row("SELECT * FROM foo", [], |r| {
+            assert_eq!(2, r.as_ref().column_count());
+            Ok(())
+        })
+    }
+    #[test]
+    fn test_dyn_box() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER);")?;
+        let b: Box<dyn ToSql> = Box::new(5);
+        db.execute("INSERT INTO foo VALUES(?1)", [b])?;
+        db.query_row("SELECT x FROM foo", [], |r| {
+            assert_eq!(5, r.get_unwrap::<_, i32>(0));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_params() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.query_row(
+            "SELECT
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+            ?31, ?32, ?33, ?34;",
+            params![
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1,
+            ],
+            |r| {
+                assert_eq!(1, r.get_unwrap::<_, i32>(0));
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    fn test_alter_table() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE x(t);")?;
+        // `execute_batch` should be used but `execute` should also work
+        db.execute("ALTER TABLE x RENAME TO y;", [])?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_batch() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = r"
+             CREATE TABLE tbl1 (col);
+             CREATE TABLE tbl2 (col);
+             ";
+        let mut batch = Batch::new(&db, sql);
+        while let Some(mut stmt) = batch.next()? {
+            stmt.execute([])?;
         }
+        Ok(())
     }
 
-    /// Default hash builder, matches hashbrown's default hasher.
-    #[derive(Clone, Default, Debug)]
-    pub struct DefaultHashBuilder(DefaultHasher);
-}
-
-pub mod lru
-{
-    use crate::
-    {
-        *,
-    };
-
-    /// A version of `HashMap` that has a user controllable order for its entries.
-    pub struct LinkedHashMap<K, V, S = DefaultHashBuilder> {
-        table: HashTable<NonNull<Node<K, V>>>,
-        hash_builder: S,
-        values: Option<NonNull<Node<K, V>>>,
-        free: Option<NonNull<Node<K, V>>>,
+    #[test]
+    fn test_invalid_batch() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let sql = r"
+            PRAGMA test1;
+            PRAGMA test2=?;
+            PRAGMA test3;
+            ";
+        let mut batch = Batch::new(&db, sql);
+        assert!(batch.next().is_ok());
+        assert!(batch.next().is_err());
+        assert!(batch.next().is_err());
+        assert!(Batch::new(&db, sql).count().is_err());
+        Ok(())
     }
 
-    pub struct LruCache<K, V, S = DefaultHashBuilder> {
-        map: LinkedHashMap<K, V, S>,
-        max_size: usize,
+    #[test]
+    #[cfg(feature = "modern_sqlite")]
+    fn test_returning() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE foo(x INTEGER PRIMARY KEY)")?;
+        let row_id =
+            db.one_column::<i64, _>("INSERT INTO foo DEFAULT VALUES RETURNING ROWID", [])?;
+        assert_eq!(row_id, 1);
+        Ok(())
     }
 
-}
-
-pub mod sync
-{
-    pub mod atomic
-    {
-        pub use std::sync::atomic::{ * };
+    #[test]
+    fn test_cache_flush() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.cache_flush()
     }
 
-    pub use std::sync::{ * };
+    #[test]
+    fn db_readonly() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(!db.is_readonly(MAIN_DB)?);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "rusqlite-macros")]
+    fn prepare_and_bind() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        let name = "Lisa";
+        let age = 8;
+        let mut stmt = prepare_and_bind!(db, "SELECT $name, $age;");
+        let (v1, v2) = stmt
+            .raw_query()
+            .next()
+            .and_then(|o| o.ok_or(Error::QueryReturnedNoRows))
+            .and_then(|r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        assert_eq!((v1.as_str(), v2), (name, age));
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "modern_sqlite")]
+    fn test_db_name() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert_eq!(db.db_name(0)?, "main");
+        assert_eq!(db.db_name(1)?, "temp");
+        assert_eq!(db.db_name(2), Err(Error::InvalidDatabaseIndex(2)));
+        db.execute_batch("ATTACH DATABASE ':memory:' AS xyz;")?;
+        assert_eq!(db.db_name(2)?, "xyz");
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "modern_sqlite")]
+    fn test_is_interrupted() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        assert!(!db.is_interrupted());
+        db.get_interrupt_handle().interrupt();
+        assert!(db.is_interrupted());
+        Ok(())
+    }
+
+    #[test]
+    fn release_memory() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.release_memory()
+    }
 }
