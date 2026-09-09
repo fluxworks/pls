@@ -119,8 +119,8 @@ pub use chacha20::{ChaCha8Rng, ChaCha12Rng, ChaCha20Rng};
 //pub use getrandom::{Error as SysError, SysRng};
 /// Raw error code.
 pub type RawOsError = i32;
-type NonZeroRawOsError = core::num::NonZeroI32;
-
+type NonZeroRawOsError = crate::num::NonZeroI32;
+///
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct SysError(NonZeroRawOsError);
 
@@ -248,54 +248,21 @@ impl SysError {
             SysError::UNSUPPORTED => "getrandom: this target is not supported",
             SysError::ERRNO_NOT_POSITIVE => "errno: did not return a positive value",
             SysError::UNEXPECTED => "unexpected situation",
-            #[cfg(any(
-                target_os = "ios",
-                target_os = "visionos",
-                target_os = "watchos",
-                target_os = "tvos",
-            ))]
-            Error::IOS_RANDOM_GEN => "SecRandomCopyBytes: iOS Security framework failure",
-            #[cfg(all(windows, target_vendor = "win7"))]
-            Error::WINDOWS_RTL_GEN_RANDOM => "RtlGenRandom: Windows system function failure",
-            #[cfg(all(
-                feature = "wasm_js",
-                target_arch = "wasm32",
-                any(target_os = "unknown", target_os = "none")
-            ))]
-            Error::WEB_CRYPTO => "Web Crypto API is unavailable",
-            #[cfg(target_os = "vxworks")]
-            Error::VXWORKS_RAND_SECURE => "randSecure: VxWorks RNG module is not initialized",
-
-            #[cfg(any(
-                getrandom_backend = "rdrand",
-                all(target_arch = "x86_64", target_env = "sgx")
-            ))]
-            Error::FAILED_RDRAND => "RDRAND: failed multiple times: CPU issue likely",
-            #[cfg(any(
-                getrandom_backend = "rdrand",
-                all(target_arch = "x86_64", target_env = "sgx")
-            ))]
-            Error::NO_RDRAND => "RDRAND: instruction not supported",
-
-            #[cfg(getrandom_backend = "rndr")]
-            Error::RNDR_FAILURE => "RNDR: Could not generate a random number",
-            #[cfg(getrandom_backend = "rndr")]
-            Error::RNDR_NOT_AVAILABLE => "RNDR: Register not supported",
             _ => return None,
         };
         Some(desc)
     }
 }
 
-impl core::error::Error for SysError {}
+impl crate::error::Error for SysError {}
 
-impl core::fmt::Debug for SysError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl crate::fmt::Debug for SysError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
         let mut dbg = f.debug_struct("Error");
         if let Some(errno) = self.raw_os_error() {
             dbg.field("os_error", &errno);
             #[cfg(feature = "std")]
-            dbg.field("description", &core::io::Error::from_raw_os_error(errno));
+            dbg.field("description", &crate::io::Error::from_raw_os_error(errno));
         } else if let Some(desc) = self.internal_desc() {
             dbg.field("internal_code", &self.0.get());
             dbg.field("description", &desc);
@@ -306,10 +273,10 @@ impl core::fmt::Debug for SysError {
     }
 }
 
-impl core::fmt::Display for SysError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl crate::fmt::Display for SysError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
         if let Some(errno) = self.raw_os_error() {
-            std::io::Error::from_raw_os_error(errno).fmt(f)
+            crate::io::Error::from_raw_os_error(errno).fmt(f)
         } else if let Some(desc) = self.internal_desc() {
             f.write_str(desc)
         } else {
@@ -323,17 +290,39 @@ impl core::fmt::Display for SysError {
 pub struct SysRng;
 
 use rand_core::{TryCryptoRng, TryRng};
+/// View an mutable initialized array as potentially-uninitialized.
+#[inline(always)]
+pub unsafe fn slice_as_uninit_mut<T>(slice: &mut [T]) -> &mut [crate::mem::MaybeUninit<T>]
+{
+    let ptr = crate::ptr::from_mut(slice) as *mut [crate::mem::MaybeUninit<T>];
+    unsafe { &mut *ptr }
+}
+
+/// Fill potentially uninitialized buffer `dest` with random bytes from the system's preferred random number source and return a mutable reference to those bytes.
+#[inline] pub fn fill_uninit(dest: &mut [crate::mem::MaybeUninit<u8>]) -> Result<&mut [u8], SysError>
+{
+    if !dest.is_empty() { crate::fill_inner(dest)?; }
+
+    Ok(unsafe { crate::slice::assume_init_mut(dest) })
+}
+
+/// Fill `dest` with random bytes from the system's preferred random number source.
+#[inline] pub fn fill(dest: &mut [u8]) -> Result<(), SysError>
+{
+    fill_uninit(unsafe { slice_as_uninit_mut(dest) })?;
+    Ok(())
+}
 
 impl TryRng for SysRng
 {
     type Error = SysError;
-    #[inline] fn try_next_u32(&mut self) -> Result<u32, Error> {
+    #[inline] fn try_next_u32(&mut self) -> Result<u32, SysError> {
         crate::u32()
     }
-    #[inline] fn try_next_u64(&mut self) -> Result<u64, Error> {
+    #[inline] fn try_next_u64(&mut self) -> Result<u64, SysError> {
         crate::u64()
     }
-    #[inline] fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> { crate::fill(dest) }
+    #[inline] fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), SysError> { Ok( crate::fill(dest) ) }
 }
 
 impl TryCryptoRng for SysRng {}

@@ -8,24 +8,6 @@
 // except according to those terms.
 
 //! Random-number generators and samplers
-//!
-//! # Quick Start
-//!
-//! ```
-//! // rand::random() supports many common types:
-//! println!("Uniform i8 sample: {}", match rand::random() {
-//!     0i8 => "zero",
-//!     i if i > 0 => "positive",
-//!     _ => "negative",
-//! });
-//!
-//! // Ranged sampling:
-//! use std::f32::consts::PI;
-//! println!("Angle: {} degrees", rand::random_range(-PI..PI));
-//! ```
-//!
-//! See also [The Book: Quick Start](https://rust-random.github.io/book/quick-start.html).
-
 #![doc(
     html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk.png",
     html_favicon_url = "https://www.rust-lang.org/favicon.ico"
@@ -47,9 +29,7 @@
 )]
 #![deny(clippy::undocumented_unsafe_blocks)]
 
-#[cfg(feature = "alloc")]
 extern crate alloc;
-#[cfg(feature = "std")]
 extern crate std;
 
 // Re-export rand_core itself
@@ -58,7 +38,50 @@ pub use rand_core;
 // Re-exports from rand_core
 pub use rand_core::{CryptoRng, Rng, SeedableRng, TryCryptoRng, TryRng};
 
-// Public modules
+///
+pub mod error
+{
+    pub use std::error::{ * };
+}
+///
+pub mod fmt
+{
+    pub use std::fmt::{ * };
+}
+///
+pub mod io
+{
+    pub use std::io::{ * };
+}
+///
+pub mod mem
+{
+    pub use std::mem::{ * };
+}
+///
+pub mod num
+{
+    pub use std::num::{ * };
+}
+///
+pub mod ptr
+{
+    pub use std::ptr::{ * };
+}
+///
+pub mod slice
+{
+    pub use std::slice::{ * };
+
+    /// Polyfill for `maybe_uninit_slice` feature's `MaybeUninit::slice_assume_init_mut`.
+    #[inline(always)] pub unsafe fn assume_init_mut<T>(slice: &mut [crate::mem::MaybeUninit<T>]) -> &mut [T]
+    {
+        let ptr = crate::ptr::from_mut(slice) as *mut [T];
+        // SAFETY: `MaybeUninit<T>` is guaranteed to be layout-compatible with `T`.
+        unsafe { &mut *ptr }
+    }
+}
+
 pub mod distr;
 pub mod prelude;
 mod rng;
@@ -261,31 +284,7 @@ pub fn random_bool(p: f64) -> bool {
     rng().random_bool(p)
 }
 
-/// Return a bool with a probability of `numerator/denominator` of being
-/// true.
-///
-/// That is, `random_ratio(2, 3)` has chance of 2 in 3, or about 67%, of
-/// returning true. If `numerator == denominator`, then the returned value
-/// is guaranteed to be `true`. If `numerator == 0`, then the returned
-/// value is guaranteed to be `false`.
-///
-/// See also the [`Bernoulli`] distribution, which may be faster if
-/// sampling from the same `numerator` and `denominator` repeatedly.
-///
-/// This function is shorthand for
-/// <code>[rng()].[random_ratio](RngExt::random_ratio)(<var>numerator</var>, <var>denominator</var>)</code>.
-///
-/// # Panics
-///
-/// If `denominator == 0` or `numerator > denominator`.
-///
-/// # Example
-///
-/// ```
-/// println!("{}", rand::random_ratio(2, 3));
-/// ```
-///
-/// [`Bernoulli`]: distr::Bernoulli
+/// Return a bool with a probability of `numerator/denominator` of being true.
 #[cfg(feature = "thread_rng")]
 #[inline]
 #[track_caller]
@@ -293,24 +292,70 @@ pub fn random_ratio(numerator: u32, denominator: u32) -> bool {
     rng().random_ratio(numerator, denominator)
 }
 
-/// Fill any type implementing [`Fill`] with random data
-///
-/// This function is shorthand for
-/// <code>[rng()].[fill](RngExt::fill)(<var>dest</var>)</code>.
-///
-/// # Example
-///
-/// ```
-/// let mut arr = [0i8; 20];
-/// rand::fill(&mut arr[..]);
-/// ```
-///
-/// Note that you can instead use [`random()`] to generate an array of random
-/// data, though this is slower for small elements (smaller than the RNG word
-/// size).
+/// Fill any type implementing [`Fill`] with random data.
 #[cfg(feature = "thread_rng")]
 #[inline]
 #[track_caller]
 pub fn fill<T: Fill>(dest: &mut [T]) {
     Fill::fill_slice(dest, &mut rng())
 }
+
+type BOOL = core::ffi::c_int;
+const TRUE: BOOL = 1;
+
+unsafe extern "system"
+{
+    fn ProcessPrng(pbdata: *mut u8, cbdata: usize) -> BOOL;
+}
+
+use crate::rngs::SysError;
+///
+#[inline] pub fn fill_inner(dest: &mut [crate::mem::MaybeUninit<u8>]) -> Result<(), SysError>
+{
+    let result = unsafe { ProcessPrng(dest.as_mut_ptr().cast::<u8>(), dest.len()) };
+    if result == TRUE { Ok(()) } else { Err(SysError::UNEXPECTED) }
+}
+/// Fill potentially uninitialized buffer `dest` with random bytes from the system's preferred random number source and return a mutable reference to those bytes.
+#[inline] pub fn fill_uninit(dest: &mut [crate::mem::MaybeUninit<u8>]) -> Result<&mut [u8], SysError> {
+    if !dest.is_empty()
+    {
+        crate::fill_inner(dest)?;
+    }
+
+    Ok(unsafe { crate::slice::assume_init_mut(dest) })
+}
+
+/// Default implementation of `inner_u32` on top of `fill_uninit`
+#[inline]
+pub fn inner_u32() -> Result<u32, SysError>
+{
+    let mut res = crate::mem::MaybeUninit::<u32>::uninit();
+    // SAFETY: the created slice has the same size as `res`
+    let dst = unsafe
+    {
+        let p: *mut crate::mem::MaybeUninit<u8> = res.as_mut_ptr().cast();
+        crate::slice::from_raw_parts_mut(p, crate::mem::size_of::<u32>())
+    };
+    crate::fill_uninit(dst)?;
+    // SAFETY: `dst` has been fully initialized by `imp::fill_inner` since it returned `Ok`.
+    Ok(unsafe { res.assume_init() })
+}
+
+/// Get random `u32` from the system's preferred random number source.
+#[inline] pub fn u32() -> Result<u32, SysError> { inner_u32() }
+
+/// Default implementation of `inner_u64` on top of `fill_uninit`
+#[inline] pub fn inner_u64() -> Result<u64, SysError>
+{
+    let mut res = crate::mem::MaybeUninit::<u64>::uninit();
+    let dst = unsafe
+    {
+        let p: *mut crate::mem::MaybeUninit<u8> = res.as_mut_ptr().cast();
+        slice::from_raw_parts_mut(p, crate::mem::size_of::<u64>())
+    };
+
+    crate::fill_uninit(dst)?;
+    Ok(unsafe { res.assume_init() })
+}
+/// Get random `u64` from the system's preferred random number source.
+#[inline] pub fn u64() -> Result<u64, SysError> { inner_u64() }
