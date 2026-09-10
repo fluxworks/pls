@@ -672,7 +672,7 @@ impl Statement<'_> {
                         ndx as c_int,
                         b.as_ptr().cast::<c_void>(),
                         length as ffi::sqlite3_uint64,
-                        ffi::SQLITE_TRANSIENT(),
+                        crate::SQLITE_TRANSIENT(),
                     )
                 }
             },

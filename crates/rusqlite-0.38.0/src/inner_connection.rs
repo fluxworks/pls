@@ -94,8 +94,8 @@ impl InnerConnection {
                 } else {
                     let mut e = error_from_handle(db, r);
                     if let Error::SqliteFailure(
-                        ffi::Error {
-                            code: ffi::ErrorCode::CannotOpen,
+                        crate::ffi::error::Error {
+                            code: crate::ffi::error::ErrorCode::CannotOpen,
                             ..
                         },
                         Some(msg),

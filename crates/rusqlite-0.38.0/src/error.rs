@@ -12,7 +12,7 @@ use std::str;
 #[non_exhaustive]
 pub enum Error {
     /// An error from an underlying SQLite call.
-    SqliteFailure(ffi::Error, Option<String>),
+    SqliteFailure(crate::ffi::error::Error, Option<String>),
 
     /// Error reported when attempting to open a connection when SQLite was
     /// configured to allow single-threaded use only.
@@ -387,7 +387,7 @@ impl Error {
     /// Returns the underlying SQLite error if this is [`Error::SqliteFailure`].
     #[inline]
     #[must_use]
-    pub fn sqlite_error(&self) -> Option<&ffi::Error> {
+    pub fn sqlite_error(&self) -> Option<&crate::ffi::error::Error> {
         match self {
             Self::SqliteFailure(error, _) => Some(error),
             _ => None,
@@ -398,7 +398,7 @@ impl Error {
     /// [`Error::SqliteFailure`].
     #[inline]
     #[must_use]
-    pub fn sqlite_error_code(&self) -> Option<ffi::ErrorCode> {
+    pub fn sqlite_error_code(&self) -> Option<crate::ffi::error::ErrorCode> {
         self.sqlite_error().map(|error| error.code)
     }
 }
@@ -407,7 +407,7 @@ impl Error {
 
 #[cold]
 pub fn error_from_sqlite_code(code: c_int, message: Option<String>) -> Error {
-    Error::SqliteFailure(ffi::Error::new(code), message)
+    Error::SqliteFailure(crate::ffi::error::Error::new(code), message)
 }
 
 macro_rules! err {
