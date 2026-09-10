@@ -2,12 +2,11 @@ use std::env;
 use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::os::fd::RawFd;
-use std::os::unix::io::FromRawFd;
+//use std::os::fd::{ RawFd };
 use std::process;
 
 use libs::pipes::pipe;
-use nix::unistd::{execve, ForkResult};
+//use nix::unistd::{execve, ForkResult};
 
 use crate::builtins;
 use crate::calculator;

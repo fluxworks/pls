@@ -1,4 +1,4 @@
-use crate::execute;
+use crate::now;
 
 pub fn get_os_name() -> String {
     let uname = get_uname();

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::env;
 use std::fs::read_dir;
 use std::io::{ErrorKind, Write};
-use std::os::unix::fs::PermissionsExt;
+//use std::os::unix::fs::PermissionsExt;
 
 use regex::Regex;
 

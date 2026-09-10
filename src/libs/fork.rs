@@ -1,5 +1,5 @@
-use nix::unistd::{fork as nix_fork, ForkResult};
-use nix::Result;
+//use nix::unistd::{fork as nix_fork, ForkResult};
+//use nix::Result;
 
 // make fork "safe again", in order not to touch the code in core.rs,
 // see https://github.com/nix-rust/nix/issues/586

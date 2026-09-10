@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Write;
-use std::os::unix::io::{FromRawFd, RawFd};
+//use std::os::unix::io::{FromRawFd, RawFd};
 
 use errno::errno;
 
