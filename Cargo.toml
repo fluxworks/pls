@@ -49,22 +49,27 @@ path = "crates/errno-0.3.14"
 version = "0.3.14"
 
 [dependencies.nix]
-version = "0.31"
+path = "crates/nix-0.31.3"
+version = "0.31.3"
 features = ["fs", "process", "signal"]
 
 [dependencies.clap]
-version = "4.5"
+path = "crates/clap-4.6.6"
+version = "4.6.6"
 default-features = false
 features = ["std", "derive", "help"]
 
-#[dependencies.rusqlite]
-#version = "0.38"
-#features = ["bundled"]
+[dependencies.rusqlite]
+path = "crates/rusqlite-0.38.0"
+version = "0.38"
+features = ["bundled"]
 
 [dependencies.time]
-version = "0.3"
+path = "crates/time-0.3.55"
+version = "0.3.55"
 features = ["local-offset"]
 
 [build-dependencies.time]
-version = "0.3"
+path = "crates/time-0.3.55"
+version = "0.3.55"
 features = ["local-offset"]
